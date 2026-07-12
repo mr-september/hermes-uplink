@@ -1,18 +1,16 @@
 # Hermes Uplink
 
-A **thin, text-only remote client** for [Hermes Agent](https://hermes-agent.nousresearch.com/).
-Use your home desktop's Hermes from any laptop or phone (browser) — with **all your existing
-sessions visible and resumable**, full tool/skill access, and no screen-sharing/video bandwidth.
+A near-universal, data-efficient, text-based "thin client" for [Hermes Agent](https://hermes-agent.nousresearch.com/). Hermes Uplink lets you keep your powerful desktop as the central hub—where all your project files, curated skills, assets, and ML libraries reside—while seamlessly directing complex workflows from any mobile or laptop browser on the go.
 
-> Design principle: *no agent code, no framework, no build step.* The client is one HTML file.
-> All the work is done by Hermes's **first-party API Server** (which runs natively on Windows — no WSL2).
-> We only add a ~100-line stdlib proxy so the client is same-origin and the API key never leaves
-> your desktop.
+Instead of relying on bandwidth-heavy, laggy screen sharing or transferring gigabytes of data to your phone, Uplink uses a loopback-only proxy behind an HTTPS tunnel. This keeps **all your existing sessions visible and seamlessly resumable**, provides full tool/skill access, and requires virtually zero bandwidth.
 
-> **Scope note:** this repo is intentionally minimal and standalone — it does *not* patch the Hermes
-> agent or its Electron UI. If you want tighter integration (e.g. a toggle inside Hermes's own
-> settings page), that is an upstream feature for Nous Research, or a personalized fork you can
-> build on top of this. We keep uplink decoupled so it survives agent upgrades.
+## Design Principles
+- **Zero build steps:** The client is a single vanilla HTML/JS file.
+- **Native execution:** Driven by Hermes's first-party API Server running natively on Windows (no WSL2/docker required).
+- **Secure architecture:** A loopback-only stdlib proxy keeps the API key on the host desktop; remote access is provided through an HTTPS tunnel.
+- **Standalone:** Uplink runs independently of the Hermes-agent and its UI packages, ensuring compatibility across agent upgrades.
+
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -20,12 +18,12 @@ flowchart LR
         B[Browser<br/>index.html<br/>vanilla JS, no build]
     end
     subgraph DESKTOP["Home desktop (Windows, native, NO WSL2)"]
-        P[proxy.py<br/>stdlib HTTP<br/>key injected server-side]
+        P[proxy.py<br/>loopback HTTP<br/>key injected server-side]
         A[Hermes gateway<br/>API Server :8642]
         R[(Shared session store<br/>%LOCALAPPDATA%\hermes\sessions<br/>desktop / tui / cron / cli)]
     end
-    TUN{{Tunnel<br/>Cloudflare (quick / named)}}
-    B -- "HTTPS same-origin<br/>(no API key in browser)" --> P
+    TUN{{"Tunnel<br/>Cloudflare (quick / named)"}}
+    B -- "HTTPS via tunnel<br/>(no API key in browser)" --> P
     P -- "Bearer token<br/>(added here)" --> A
     A -- "reads/writes" --> R
     B -. "remote reach" .-> TUN -.-> P
@@ -35,159 +33,70 @@ flowchart LR
     class P,A,R desk;
 ```
 
-## Files
+## Features
 
-| File | Role |
-|------|------|
-| `index.html` | The client. Vanilla JS, mobile-responsive, zero dependencies, no build step. |
-| `proxy.py`   | Stdlib reverse proxy. Serves `index.html` same-origin and forwards `/api/*` `/v1/*` `/health*` to the Hermes API Server with the Bearer key added **server-side**. |
-| `launch.bat` | Windows launcher (enables API Server, sets `HERMES_API_KEY` + `API_SERVER_KEY`, `HERMES_PORT`, `HERMES_UPSTREAM`). |
-| `.gitignore` | Excludes `.uplink-key.txt` and `__pycache__`. |
+- **Full Session Sync:** Lists all sessions from the shared session store (CLI, Electron/desktop, Telegram, etc.). You can resume any session, start new chats, and use full-text search.
+- **Battery-Friendly Auto-Refresh:** The client refreshes when the tab gains focus or becomes visible, eliminating background polling. It also has a manual refresh button.
+- **Real-time Streaming:** Supports streaming turns via SSE (Server-Sent Events), rendering tool calls and progress in real-time.
+- **Tool Discovery:** Automatically discovers skills and toolsets via `/v1/skills` and `/v1/toolsets`.
+- **Custom UI:** A mobile-responsive, three-pane layout featuring a custom dark theme (Hermes-amber accent).
 
-## What works (anchored to the documented API Server contract)
+## Prerequisites
+- **Python 3**: Must be installed and available in your system PATH.
+- **Hermes CLI**: Must be installed and available in your system PATH.
+- **No Python package install is required:** The proxy uses the Python standard library and the Markdown renderer is vendored.
 
-- Lists **all** sessions from the shared session store (CLI, Electron/desktop, Telegram, cron…).
-- Resume / continue any session; new chat; full-text search.
-- Streaming turns via SSE: `run.started` → `message.started` → `assistant.delta` → `tool.progress`
-  (rendered as tool-call cards) → `assistant.completed` → `run.completed`.
-- Skills & toolsets discovery via `/v1/skills` and `/v1/toolsets`.
-- `/v1/capabilities` is exposed for clients that want to feature-detect.
+## Setup & Configuration
 
-### Themes / UX parity (reality check)
-This client is a **from-scratch minimal UI**, NOT a clone of the native Hermes Electron app.
-Consequences:
-- It does **not** inherit the desktop app's skins/theme engine. It ships **one dark theme**
-  (Hermes-amber accent) with a mobile-responsive 3-pane layout (sessions · chat · skills/tools).
-- To get the **real** Hermes Electron UI on an edge device talking to your desktop backend,
-  see **"Alternative: official Desktop remote-backend"** below — that path reuses Hermes's own
-  rendering and its theme system, but its live chat pane needs a POSIX PTY (WSL2) on the *host*.
+### 1. Desktop Configuration (Host)
+Run **`launch.bat`** on your host machine. This script configures the Hermes API Server, generates a synchronized API key, restarts the gateway, and starts the local proxy on `http://127.0.0.1:8787`.
 
-## Setup — two steps, then you're done
+The terminal will output a **passphrase**, which is required for remote access from your edge devices. Treat this passphrase like a full-access password: anyone who has it can read existing sessions and use the capabilities exposed by Hermes.
 
-### Step 1 — Desktop (one time, one click)
-Double-click **`launch.bat`**. It enables the Hermes API Server, generates an API key (and writes it to
-Hermes's `API_SERVER_KEY` so the proxy key and server key stay in sync) + a one-time **passphrase**,
-restarts the gateway, and starts the local proxy on `http://127.0.0.1:8787`.
-It prints the **passphrase** — that's the only secret you'll ever type on a phone.
+> **Auto-start:** To run the proxy automatically on login (no admin required), execute `launch.bat install`. Use `launch.bat start|stop|status|uninstall` to manage the service. (Or simply ask Hermes to help you set it up.)
 
-> Want it to start automatically when you log in? Run `launch.bat install` once (no admin needed).
-> Then `launch.bat start` / `stop` / `status` / `uninstall` control it.
+### 2. Edge Device/Thin Client Access
+For remote access, run **`tunnel.bat`** and open the HTTPS URL it prints. Enter the generated passphrase when prompted, then add the page to your Home Screen for a native app-like experience. The browser session normally remains authorized for up to 12 hours; you may need to enter the passphrase again after that or after the desktop proxy restarts.
 
-### Step 2 — Edge device (phone / laptop browser)
-1. **Open the URL** (see "How to reach it" below).
-2. **Type the passphrase once.** A cookie is saved — you never type it again.
-3. **Add to Home Screen** (phone) → a full-screen app icon. Done.
+#### Connection Methods
 
-That's it. To use it later, just open the icon/bookmark.
+| Method | URL to open | Notes |
+|--------|-------------|-------|
+| Local Machine | `http://127.0.0.1:8787` | Always works locally |
+| Over the Internet | Tunnel URL (see below) | Recommended for remote access |
 
----
+The proxy deliberately refuses non-loopback binds. Direct LAN HTTP would expose the passphrase and agent traffic to anyone able to observe the local network.
 
-### How to reach it from elsewhere
+#### Internet Access via Cloudflare Tunnel
+For secure internet access without port-forwarding, use Cloudflare Tunnel (`cloudflared`). The included launcher pins cloudflared `2026.7.0` and verifies its SHA-256 before execution.
 
-| Where | What to open | Notes |
-|-------|--------------|-------|
-| Same machine | `http://127.0.0.1:8787` | always works |
-| Phone on same WiFi | `http://<desktop-ip>:8787` | needs `set HERMES_BIND=0.0.0.0` before `launch.bat` (exposes port on LAN; passphrase still required) |
-| **Over the internet** | a tunnel URL (next section) | recommended for untrusted networks |
+- **Quick Tunnel (No Account):** Run `tunnel.bat`. It provides a temporary URL (e.g., `https://*.trycloudflare.com`) that changes every time it runs. Ideal for quick, temporary access.
+- **Named Tunnel (Free Account):** For a stable URL, sign up for a free Cloudflare account, run `bin\cloudflared.exe login`, and create a named tunnel. Cloudflare Access can provide an additional identity layer; the Uplink passphrase remains required.
 
-#### Internet access — Cloudflare Tunnel (the only remote method)
+Share the tunnel URL and passphrase separately. The URL is not a secret, but the passphrase is.
 
-We use **Cloudflare Tunnel** (`cloudflared`). It opens an *outbound* connection from your desktop to
-Cloudflare and gives you a public `https://….trycloudflare.com` URL — no port-forwarding, no static
-IP, no router config. You can use it **with or without a free Cloudflare account**:
+## Security Model
+- **No API Keys in Browser:** The proxy injects the Hermes API key server-side. The key never reaches the browser.
+- **Session Authentication:** The passphrase is accepted only by a POST auth endpoint. The proxy issues a short-lived, HttpOnly browser session cookie; the passphrase is never placed in a URL or sent on API requests.
+- **Full Agent Privilege:** A successful session can read existing sessions and invoke the capabilities exposed by Hermes. Treat the passphrase as a full-access credential.
+- **Loopback Boundary:** The proxy listens only on localhost. Remote HTTPS termination belongs to the tunnel or a separately managed reverse proxy.
 
-| | **A. Quick tunnel (no account)** | **B. Named tunnel (free account)** |
-|---|---|---|
-| Setup | just run `tunnel.bat` | one-time: create tunnel in Cloudflare, run `cloudflared tunnel run <name>` |
-| URL | random `*.trycloudflare.com`, **changes every launch** | **stable/permanent** (e.g. `hermes.yourname.trycloudflare.com` or your own domain) |
-| Survives restart? | no (new URL each time) | **yes** |
-| Passphrase | still required (our proxy gate) | still required, **or** add Cloudflare Access SSO (Google/GitHub login, no passphrase) |
-| Best for | "I want to check my agent from the hotel tonight" | a permanent phone bookmark / daily use |
+## Limitations
+- **API Dependency:** Uplink relies on the Hermes API Server REST/SSE endpoints. Major upstream API changes may require client updates.
+- **File Uploads:** File uploads and image support are currently unsupported, consistent with the API Server's capabilities.
+- **Version compatibility:** The Hermes CLI/API version is not bundled. Validate the installed Hermes version against the API surface used by this client.
 
-**Path A — unregistered, ephemeral (default, zero signup):**
-1. Local proxy running: double-click `launch.bat` (or `launch.bat start`).
-2. Run **`tunnel.bat`** — first time it downloads the portable `cloudflared` (~50 MB, one-time), then
-   prints a URL like `https://wise-fog-1234.trycloudflare.com`. Open it on your phone, type the
-   **passphrase** once. Done. `tunnel.bat` uses `--no-prechecks --protocol http2` so it works even
-   where Cloudflare's startup pre-check is flaky (it can falsely report a block on edge port 7844).
-   To stop, close the `tunnel.bat` window.
+## Alternative Clients
+Many existing remote solutions are hard-pegged to specific (often outdated) Hermes versions, require cumbersome setups (like WSL or Docker), or run completely segregated agent instances. When choosing a client, consider these alternatives:
 
-**Path B — registered, durable (free Cloudflare account, stable bookmark):**
-1. Sign up free at https://dash.cloudflare.com/ (no payment; a custom domain is *optional*).
-2. Install `cloudflared` (already downloaded to `bin\` by `tunnel.bat`), then in a terminal:
-   ```bat
-   bin\cloudflared.exe login
-   bin\cloudflared.exe tunnel create hermes-uplink
-   bin\cloudflared.exe tunnel route dns hermes-uplink hermes.yourname.trycloudflare.com
-   ```
-3. Run it (proxy must be up): `bin\cloudflared.exe tunnel run hermes-uplink` → permanent URL.
-   (Optional) Add Cloudflare **Access** (zero-knowledge SSO) so no passphrase is needed:
-   https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/
-
-**Official docs:** Quick Tunnels https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/do-more-with-tunnels/trycloudflare/
-· Install `cloudflared` https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/install-cloudflared/
-· Named tunnels + Access SSO https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/tunnel-guide/
-
-> **Troubleshooting — tunnel starts but no URL / "hard_fail" on port 7844:** Cloudflare's *startup*
-> connectivity pre-check can falsely report a block on edge port 7844 even when the tunnel works.
-> `tunnel.bat` already passes `--no-prechecks` to skip it. If running `cloudflared` manually and you
-> see `hard_fail=true` with no URL, add `--no-prechecks`. The local app is unaffected either way.
+- **Open WebUI:** A robust interface, but it maintains an isolated session store. It cannot access or resume your existing Hermes desktop/Electron sessions.
+- **hermes-webui:** A third-party reimplementation that is heavily version-pinned and has historically faced compatibility issues on Windows.
+- **Official Desktop Remote Backend:** Hermes's native Electron app can attach to a remote dashboard (`Settings → Gateway → Remote gateway`). This provides the exact native UI and theme engine. However, the live `/chat` pane currently requires a POSIX PTY (WSL2) on the Windows host machine to function fully.
 
 ---
-
-### Multi-device sync (no battery drain)
-The shared session store is the single source of truth, so all devices see the same sessions.
-The client refreshes **when you actually look at it** (tab/window focus, or opening the app) plus a
-manual **↻ button**. No background poller — so it won't drain your phone. Switching laptop→phone
-converges within ~1 second of opening the tab.
-
-### Security model (important)
-- The proxy requires the **passphrase** before any `/api` or `/v1` call (returns `401` otherwise).
-  The passphrase is **separate from the Hermes API key** — the key is injected server-side and
-  never reaches the browser. So a tunnel URL alone is useless to an attacker.
-- For zero passphrase-to-remember, front the tunnel with **Cloudflare Access SSO** (sign in with
-  Google/GitHub) — one-time Cloudflare login + domain.
-
-### Auto-start on login (no elevation)
-`launch.bat install` copies `autostart.vbs` into the Windows **Startup** folder (the same mechanism
-Hermes's own gateway login item uses) — no admin needed. `start` runs it headless via `pythonw`.
-This is intentionally kept out of the Hermes agent/Electron code; uplink stays a focused, standalone
-repo (see scope note at top).
-
-## Verification checklist (run before trusting it)
-
+**Verification Checklist:**
 - [ ] `curl http://127.0.0.1:8642/health` → `{"status":"ok"}`
-- [ ] `curl http://127.0.0.1:8787/api/sessions` (no key) → **401** (gate works)
-- [ ] `curl "http://127.0.0.1:8787/__auth?t=<passphrase>"` → **204 + Set-Cookie**
-- [ ] with cookie: `/api/sessions` → **200** + your **desktop/Electron** sessions (shared store)
-- [ ] `curl http://127.0.0.1:8787/v1/capabilities` works with **no key** (proxy injects it)
-- [ ] Open the URL in a phone browser; type passphrase once; resume an LLM-Isomorph session;
-      confirm a tool call executes on the desktop.
-
-## Alternative: official Desktop "remote backend"
-
-Hermes's **first-party Electron app** can attach to a dashboard on another machine
-(`Settings → Gateway → Remote gateway` → Remote URL + Sign in). That reuses Hermes's own UI
-and theme engine. Caveat: on a **native-Windows host** the dashboard's live `/chat` pane needs a
-POSIX PTY (WSL2), so the chat tab would show a "use WSL2" banner — the session *viewer* and config
-pages work natively. The dashboard is a different server (`hermes dashboard`, port 9119) than the
-API Server (8642) used here; they are complementary, not interchangeable.
-
-## Honest limitations
-
-- Depends on the documented API Server REST/SSE surface (`/api/sessions`, `/v1/skills`,
-  `/v1/toolsets`, `/v1/capabilities`). First-party and versioned with the agent, but a major
-  breaking change upstream would need a small client tweak.
-- `proxy.py` buffers each response (incl. SSE) before relaying — fine interactively; chunked
-  passthrough is a later enhancement.
-- No file upload (the API Server itself doesn't support non-image uploads); images not surfaced yet.
-- Not a fork of hermes-webui; intentionally reimplements nothing of the agent.
-- Theme parity with the desktop app is **not** automatic (see Themes note above).
-
-## Why not hermes-webui / Open WebUI?
-
-- **Open WebUI** keeps its *own* session store → your desktop/Electron sessions would be invisible
-  on the phone (siloed). Disqualified by the "continue existing sessions" requirement.
-- **hermes-webui** (and the `hermes-windows-native` packaging) is a third-party, heavier
-  reimplementation that has historically broken on Windows (no tools/skills access) and is
-  version-pinned (0.17.0). We avoid it to stay decoupled and minimal.
+- [ ] `curl http://127.0.0.1:8787/api/sessions` (no cookie) → **401** (authentication is enforced)
+- [ ] `curl -i -c cookies.txt -H "Content-Type: application/json" -d "{\"passphrase\":\"<passphrase>\"}" http://127.0.0.1:8787/__auth` → **204** + `Set-Cookie`
+- [ ] `curl -b cookies.txt http://127.0.0.1:8787/api/sessions` → **200** + lists your desktop/Electron sessions
+- [ ] `curl "http://127.0.0.1:8787/api/sessions?t=<passphrase>"` → **401** (credentials are not accepted in URLs)

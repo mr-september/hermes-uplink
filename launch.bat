@@ -12,9 +12,6 @@ REM    launch.bat status       -> is it running?
 REM
 REM  Env (optional):
 REM    HERMES_PORT   port to bind        (default 8787)
-REM    HERMES_BIND   bind address        (default 127.0.0.1 = loopback only)
-REM                  set to 0.0.0.0 for LAN-direct access (phone on same WiFi).
-REM                  loopback is safest; for phone use the Cloudflare tunnel instead.
 REM    HERMES_UPSTREAM  API Server URL     (default http://127.0.0.1:8642)
 REM
 REM  Auto-start uses the Windows Startup folder (no admin/elevation needed; same
@@ -24,42 +21,94 @@ REM =====================================================================
 setlocal
 cd /d "%~dp0"
 
+if "%HERMES_PORT%"=="" set HERMES_PORT=8787
+set "HERMES_BIND=127.0.0.1"
+
 if /i "%1"=="install"   call :svc install & goto :eof
 if /i "%1"=="uninstall" call :svc uninstall & goto :eof
 if /i "%1"=="start"     call :svc start & goto :eof
 if /i "%1"=="stop"      call :svc stop & goto :eof
 if /i "%1"=="status"    call :svc status & goto :eof
 
+REM ---- verify core command-line environments ----
+where python >nul 2>&1
+if errorlevel 1 (
+  echo [!] Python 3 is not installed or not in your PATH. Please install it to continue.
+  pause
+  exit /b 1
+)
+where hermes >nul 2>&1
+if errorlevel 1 (
+  echo [!] 'hermes' command-line interface was not found in your PATH.
+  pause
+  exit /b 1
+)
+
 REM ---- first-run setup (idempotent) ----
 echo [*] Ensuring Hermes API Server is enabled (native Windows, no WSL2)...
 hermes config set API_SERVER_ENABLED true
+if errorlevel 1 (
+  echo [!] Hermes API configuration failed.
+  pause
+  exit /b 1
+)
 if not exist ".uplink-key.txt" (
   echo [*] Generating API key...
-  python -c "import secrets,base64; open('.uplink-key.txt','w').write(base64.urlsafe_b64encode(secrets.token_bytes(24)).decode())"
+  python -c "import secrets,base64; open('.uplink-key.txt','w',encoding='ascii',newline='').write(base64.urlsafe_b64encode(secrets.token_bytes(24)).decode())"
+  if errorlevel 1 (
+    echo [!] API key generation failed.
+    pause
+    exit /b 1
+  )
 )
+set "HERMES_API_KEY="
 set /p HERMES_API_KEY=<.uplink-key.txt
-hermes config set API_SERVER_KEY %HERMES_API_KEY%
-if not exist ".uplink-pass.txt" (
-  python -c "import secrets,string; print(''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(8)))" > .uplink-pass.txt
+if not defined HERMES_API_KEY (
+  echo [!] API key file is empty.
+  pause
+  exit /b 1
 )
+hermes config set API_SERVER_KEY "%HERMES_API_KEY%"
+if errorlevel 1 (
+  echo [!] Hermes API key configuration failed.
+  pause
+  exit /b 1
+)
+echo [*] Checking passphrase strength...
+python -c "import os,secrets,string; p='.uplink-pass.txt'; v=open(p,encoding='ascii').read().strip() if os.path.exists(p) else ''; v=v if len(v)>=20 and v.isalnum() else ''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)); open(p,'w',encoding='ascii',newline='').write(v)"
+if errorlevel 1 (
+  echo [!] Passphrase generation failed.
+  pause
+  exit /b 1
+)
+set "UPLINK_PASSPHRASE="
 set /p UPLINK_PASSPHRASE=<.uplink-pass.txt
+if not defined UPLINK_PASSPHRASE (
+  echo [!] Passphrase file is empty.
+  pause
+  exit /b 1
+)
 
 echo [*] Ensuring gateway is running (API server lives inside it)...
-hermes gateway restart >nul 2>&1
+hermes gateway restart
+if errorlevel 1 (
+  echo [!] Hermes gateway restart failed. The proxy was not started.
+  pause
+  exit /b 1
+)
 
-if "%HERMES_PORT%"=="" set HERMES_PORT=8787
-if "%HERMES_BIND%"=="" set HERMES_BIND=127.0.0.1
 
 echo.
 echo ============================================================
 echo  Hermes Uplink ready on this machine.
-echo  URL :  http://%HERMES_BIND%:%HERMES_PORT%
+echo  URL :  http://127.0.0.1:%HERMES_PORT% (local browser only)
 echo  Pass:  %UPLINK_PASSPHRASE%   (type on first phone connect)
-echo  For phone over the internet:  run tunnel.bat
+echo  For phone access:  run tunnel.bat for an HTTPS URL
 echo ============================================================
 echo.
-set HERMES_UPSTREAM=http://127.0.0.1:8642
-python proxy.py --host %HERMES_BIND% --port %HERMES_PORT%
+set "HERMES_UPSTREAM=http://127.0.0.1:8642"
+python proxy.py --host "%HERMES_BIND%" --port "%HERMES_PORT%"
+if errorlevel 1 echo [!] Hermes Uplink stopped with an error.
 pause
 goto :eof
 
@@ -69,7 +118,10 @@ set "STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
 set "LINK=%STARTUP%\HermesUplink.vbs"
 if /i not "%1"=="install" goto svc_not_install
 echo [*] Installing auto-start on login (Startup folder, headless via pythonw)...
-copy /Y "%~dp0autostart.vbs" "%LINK%" >nul
+echo Dim WShell > "%LINK%"
+echo Set WShell = CreateObject("WScript.Shell") >> "%LINK%"
+echo WShell.CurrentDirectory = """%~dp0""" >> "%LINK%"
+echo WShell.Run "wscript.exe autostart.vbs", 0, False >> "%LINK%"
 if exist "%LINK%" (echo [+] Installed. Starts on next logon. Run: launch.bat start) else echo [!] Failed to copy to Startup.
 goto :eof
 :svc_not_install
@@ -82,12 +134,11 @@ if exist "%LINK%" (wscript "%LINK%" && echo [+] Started headless.) else echo [!]
 goto :eof
 :svc_not_start
 if /i not "%1"=="stop" goto svc_not_stop
-for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8787" ^| findstr LISTENING') do taskkill /pid %%p /t /f >nul 2>&1
-echo [+] Stop signal sent.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0service.ps1" -Action stop -Port %HERMES_PORT%
 goto :eof
 :svc_not_stop
 if /i not "%1"=="status" goto :eof
-netstat -an | findstr ":8787" | findstr LISTENING >nul && echo [+] Running on http://127.0.0.1:8787 || echo [!] Not running (run: launch.bat start)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0service.ps1" -Action status -Port %HERMES_PORT%
 goto :eof
 
 

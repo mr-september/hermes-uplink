@@ -157,7 +157,7 @@
     <div id="composer">
       <textarea id="input" placeholder="Message the agent… (Enter to send, Shift+Enter newline)"></textarea>
       <button class="primary" id="sendBtn">Send</button>
-      <div id="ring" title="Tokens"><span id="ringTxt"></span></div>
+      <div id="ring" title="Request status" aria-busy="false"></div>
     </div>
   </div>
 
@@ -175,28 +175,29 @@
     <div class="box">
       <h3 style="margin:0 0 4px">Connection</h3>
       <div style="font-size:12px;color:var(--muted)">Leave Server URL empty to use same-origin (proxy mode).</div>
-      <label>Server base URL (e.g. https://hermes.example.com or http://host:8642)</label>
+      <label>Server base URL (e.g. https://hermes.example.com or http://127.0.0.1:8642)</label>
       <input id="cfgUrl" placeholder="(same origin)" />
       <label>API key (Bearer) — only needed in direct mode</label>
       <input id="cfgKey" type="password" placeholder="(injected by proxy in same-origin mode)" />
       <div class="diag" id="diag"></div>
-      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
-        <button id="diagBtn">Test</button>
-        <button id="cfgCancel">Cancel</button>
-        <button class="primary" id="cfgSave">Save</button>
-      </div>
+       <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+         <button id="diagBtn">Test</button>
+         <button id="logoutBtn">Log out</button>
+         <button id="cfgCancel">Cancel</button>
+         <button class="primary" id="cfgSave">Save</button>
+       </div>
     </div>
   </div>
 
   <div class="scrim hidden" id="scrim"></div>
 
-  <!-- passphrase gate (one-time per device) -->
+  <!-- passphrase gate (one-time per browser session) -->
   <div class="modal hidden" id="authModal">
     <div class="box">
       <h3 style="margin:0 0 4px">Hermes Uplink</h3>
       <div style="font-size:12px;color:var(--muted)">Enter the passphrase shown on your desktop launcher.</div>
       <label>Passphrase</label>
-      <input id="authInput" type="password" placeholder="••••••••" autocomplete="off" />
+      <input id="authInput" type="password" placeholder="••••••••" autocomplete="current-password" />
       <div class="diag" id="authDiag"></div>
       <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
         <button class="primary" id="authSubmit">Connect</button>
@@ -211,40 +212,94 @@ const LS_KEY = "hermes-uplink-cfg";
 let cfg = loadCfg();
 let activeId = null;
 let streaming = false;
-let gated = false; // server requires passphrase
+let booted = false;
 
-function loadCfg(){ try{ return JSON.parse(localStorage.getItem(LS_KEY))||{} }catch{ return {} } }
-function saveCfg(){ localStorage.setItem(LS_KEY, JSON.stringify(cfg)) }
+function loadCfg(){
+  try{
+    const value = JSON.parse(localStorage.getItem(LS_KEY));
+    if(!value || typeof value !== "object") return {};
+    delete value.token;
+    return value;
+  }catch{ return {} }
+}
+function saveCfg(){
+  try{ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }catch{}
+}
 function base(){ return (cfg.url||"").replace(/\/+$/,"") }
+function externalMode(){
+  if(!base()) return false;
+  try{ return new URL(base(), window.location.origin).origin !== window.location.origin; }
+  catch{ return true; }
+}
 
 async function api(path, opts={}){
   const url = base() + path;
   const h = Object.assign({}, opts.headers||{});
-  if(cfg.key) h["Authorization"] = "Bearer " + cfg.key;
-  if(cfg.token) h["x-uplink-token"] = cfg.token;   // one-time passphrase token
+  if(cfg.key && externalMode()) h["Authorization"] = "Bearer " + cfg.key;
   return fetch(url, Object.assign({}, opts, {headers:h, credentials:"same-origin"}));
 }
 
 /* ---------- auth gate ---------- */
+function showAuth(message){
+  const modal = document.getElementById("authModal");
+  document.getElementById("authDiag").textContent = message || "";
+  modal.classList.remove("hidden");
+  document.getElementById("authInput").focus();
+}
 async function ensureAuth(){
-  // If we already hold a token, the cookie is likely set; just try a live call.
-  const r = await fetch(base() + "/api/sessions?limit=1", {credentials:"same-origin"});
-  if(r.status !== 401) return true;
-  // 401 -> need passphrase
-  gated = true;
-  document.getElementById("authModal").classList.remove("hidden");
+  if(new URLSearchParams(window.location.search).has("t")){
+    const newUrl = window.location.pathname + window.location.hash;
+    window.history.replaceState({}, document.title, newUrl);
+  }
+  try{
+    const r = await api("/api/sessions?limit=1");
+    if(r.status !== 401) return true;
+    if(externalMode()){
+      alert("External API unauthorized. Check the API key in Settings.");
+      return true;
+    }
+  }catch(e){
+    showAuth("Cannot reach the Uplink proxy. Start it, then try again.");
+    return false;
+  }
+  showAuth("Enter the passphrase shown on your desktop launcher.");
   return false;
 }
-function submitAuth(){
+async function submitAuth(){
   const v = document.getElementById("authInput").value.trim();
   if(!v){ document.getElementById("authDiag").textContent = "Enter the passphrase."; return; }
-  fetch(base() + "/__auth?t=" + encodeURIComponent(v), {credentials:"same-origin"})
-    .then(r => { if(r.status===204){ cfg.token=v; saveCfg(); document.getElementById("authModal").classList.add("hidden"); boot(); }
-                 else { document.getElementById("authDiag").textContent = "Incorrect passphrase."; } })
-    .catch(e => { document.getElementById("authDiag").textContent = "Error: "+e.message; });
+  const button = document.getElementById("authSubmit");
+  button.disabled = true;
+  try{
+    const r = await fetch(base()+"/__auth", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({passphrase:v}),
+      credentials:"same-origin"
+    });
+    if(r.status===204){
+      document.getElementById("authInput").value = "";
+      document.getElementById("authModal").classList.add("hidden");
+      boot();
+    }else if(r.status===429){
+      document.getElementById("authDiag").textContent = "Too many attempts. Wait briefly and try again.";
+    }else if(r.status===401){
+      document.getElementById("authDiag").textContent = "Incorrect passphrase.";
+    }else{
+      document.getElementById("authDiag").textContent = "Authentication service unavailable.";
+    }
+  }catch(e){
+    document.getElementById("authDiag").textContent = "Cannot reach the Uplink proxy.";
+  }finally{
+    button.disabled = false;
+  }
 }
 document.getElementById("authSubmit").onclick = submitAuth;
 document.getElementById("authInput").addEventListener("keydown", e=>{ if(e.key==="Enter") submitAuth(); });
+async function logout(){
+  try{ await fetch(base()+"/__logout", {method:"POST", credentials:"same-origin"}); }catch{}
+  window.location.reload();
+}
 
 /* ---------- status dot + silent retry ---------- */
 let retryTimer = null;
@@ -255,18 +310,20 @@ function setStatus(state){
 }
 async function probe(){
   try{
-    const r = await fetch(base()+"/health", {credentials:"same-origin"});
+    const r = await api("/health");
     setStatus(r.ok ? "ok" : "bad");
-  }catch{ setStatus("bad"); }
+    if(!r.ok) scheduleProbe(); else clearTimeout(retryTimer);
+  }catch{ setStatus("bad"); scheduleProbe(); }
 }
 function scheduleProbe(){
   clearTimeout(retryTimer);
-  retryTimer = setTimeout(probe, 8000); // silent; no modal
+  retryTimer = setTimeout(probe, 8000);
 }
 
 /* ---------- boot ---------- */
 function boot(){
-  probe(); scheduleProbe();
+  booted = true;
+  probe();
   loadSessions();
 }
 
@@ -285,45 +342,60 @@ async function refresh(){
   try{
     await loadSessions();
     const r = await api("/api/sessions/"+encodeURIComponent(activeId)+"/messages");
-    if(r.ok){ const d = await r.json(); const msgs = d.data || d.messages || (Array.isArray(d)?d:[]); renderThread(msgs); }
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const d = await r.json();
+    const msgs = d.data || d.messages || (Array.isArray(d)?d:[]);
+    renderThread(msgs);
+  }catch(e){
+    setStatus("bad");
   }finally{
     btn.style.opacity = "1";
     refreshing = false;
   }
 }
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) refresh(); });
-window.addEventListener("focus", refresh);
+window.addEventListener("focus", ()=> refresh());
 
 /* ---------- sessions ---------- */
 async function loadSessions(){
   const el = document.getElementById("sessionList");
-  el.innerHTML = "<div style='color:var(--muted);padding:10px'>Loading…</div>";
+  showLoading(el);
   try{
     const r = await api("/api/sessions?limit=200&include_children=true");
-    if(r.status === 401){ gated=true; document.getElementById("authModal").classList.remove("hidden"); return; }
+    if(r.status === 401){ showAuth("Your browser session expired. Enter the passphrase again."); return; }
     if(!r.ok) throw new Error("HTTP "+r.status);
     const data = await r.json();
     const sessions = Array.isArray(data) ? data : (data.sessions||data.data||[]);
     renderSessions(sessions);
-  }catch(e){ el.innerHTML = "<div style='color:var(--red);padding:10px'>Failed: "+escapeHtml(e.message)+"</div>"; }
+  }catch(e){ showError(el, "Failed to load sessions."); }
 }
 
 function renderSessions(sessions){
   const el = document.getElementById("sessionList");
   const q = (document.getElementById("searchInput").value||"").toLowerCase();
-  el.innerHTML = "";
-  if(!sessions.length){ el.innerHTML = "<div style='color:var(--muted);padding:10px'>No sessions.</div>"; return; }
+  el.replaceChildren();
+  if(!sessions.length){ el.appendChild(messageElement("No sessions.")); return; }
   const sorted = sessions.slice().sort((a,b)=> (b.updated_at||b.last_active||0)-(a.updated_at||a.last_active||0));
   for(const s of sorted){
-    const title = s.title || s.preview || s.id || "(untitled)";
-    if(q && !title.toLowerCase().includes(q) && !(s.source||"").toLowerCase().includes(q)) continue;
+    const title = String(s.title || s.preview || s.id || "(untitled)");
+    const source = String(s.source || "cli");
+    if(q && !title.toLowerCase().includes(q) && !source.toLowerCase().includes(q)) continue;
     const div = document.createElement("div");
     div.className = "sess" + (s.id===activeId?" active":"");
-    const live = s.active ? "<span class='badge live'>live</span>" : "";
-    div.innerHTML = "<div class='t'>"+escapeHtml(title)+"</div>"+
-      "<div class='m'><span class='badge'>"+escapeHtml(s.source||"cli")+"</span>"+live+
-      "<span>"+(s.message_count||0)+" msgs</span>"+
-      "<span>"+escapeHtml(relTime(s.updated_at||s.last_active))+"</span></div>";
+    const titleNode = document.createElement("div");
+    titleNode.className = "t";
+    titleNode.textContent = title;
+    const meta = document.createElement("div");
+    meta.className = "m";
+    meta.appendChild(badgeElement(source, false));
+    if(s.active) meta.appendChild(badgeElement("live", true));
+    const count = document.createElement("span");
+    count.textContent = String(s.message_count || 0) + " msgs";
+    meta.appendChild(count);
+    const updated = document.createElement("span");
+    updated.textContent = relTime(s.updated_at || s.last_active);
+    meta.appendChild(updated);
+    div.append(titleNode, meta);
     div.onclick = ()=> openSession(s.id, title);
     el.appendChild(div);
   }
@@ -332,15 +404,16 @@ function renderSessions(sessions){
 async function openSession(id, title){
   activeId = id;
   document.getElementById("activeTitle").textContent = title || id;
-  renderSessionsPlaceholder();
   try{
     const r = await api("/api/sessions/"+encodeURIComponent(id)+"/messages");
-    const data = r.ok ? await r.json() : {data:[]};
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const data = await r.json();
     const msgs = data.data || data.messages || (Array.isArray(data)?data:[]);
-    renderThread(msgs);
-  }catch(e){ renderThread([]); addMsg("system","Could not load history: "+e.message); }
+    if(activeId === id) renderThread(msgs);
+  }catch(e){ if(activeId === id){ renderThread([]); addMsg("system","Could not load history: "+e.message); } }
+  if(activeId !== id) return;
   document.querySelectorAll(".sess").forEach(x=>x.classList.remove("active"));
-  loadSessions();
+  await loadSessions();
 }
 
 async function newSession(){
@@ -351,7 +424,7 @@ async function newSession(){
     const id = s.id || (s.session&&s.session.id);
     if(!id) throw new Error("no id in response");
     await loadSessions();
-    openSession(id, "New chat");
+    await openSession(id, "New chat");
   }catch(e){ alert("New chat failed: "+e.message); }
 }
 
@@ -363,13 +436,14 @@ async function send(){
   if(!text) return;
   if(!activeId){ await newSession(); }
   if(!activeId) return;
+  const sessionId = activeId;
+  const sessionTitle = document.getElementById("activeTitle").textContent;
   ta.value = "";
   addMsg("user", text);
   streaming = true; setBusy(true);
   const bubble = addMsg("assistant", "");
-  let acc = "";
   try{
-    const r = await api("/api/sessions/"+encodeURIComponent(activeId)+"/chat/stream", {
+    const r = await api("/api/sessions/"+encodeURIComponent(sessionId)+"/chat/stream", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({input:text})
     });
@@ -381,9 +455,10 @@ async function send(){
       const {done,value} = await reader.read();
       if(done) break;
       buf += dec.decode(value, {stream:true});
-      let idx;
-      while((idx = buf.indexOf("\n\n")) >= 0){
-        const frame = buf.slice(0, idx); buf = buf.slice(idx+2);
+      let separator;
+      while((separator = /\r?\n\r?\n/.exec(buf)) !== null){
+        const frame = buf.slice(0, separator.index);
+        buf = buf.slice(separator.index + separator[0].length);
         handleFrame(frame, bubble);
       }
     }
@@ -392,15 +467,19 @@ async function send(){
     bubble.querySelector(".body").textContent += "\n[error] "+e.message;
   }finally{
     streaming = false; setBusy(false);
-    openSession(activeId, document.getElementById("activeTitle").textContent);
+    if(activeId === sessionId) await openSession(sessionId, sessionTitle);
   }
 }
 
 function handleFrame(frame, bubble){
   let event="message", data="";
-  for(const line of frame.split("\n")){
+  for(const line of frame.split(/\r?\n/)){
     if(line.startsWith("event:")) event = line.slice(6).trim();
-    else if(line.startsWith("data:")) data += line.slice(5).trim();
+    else if(line.startsWith("data:")){
+      let value = line.slice(5);
+      if(value.startsWith(" ")) value = value.slice(1);
+      data += (data ? "\n" : "") + value;
+    }
   }
   let obj=null; try{ obj = JSON.parse(data) }catch{}
   if(event==="assistant.delta"){
@@ -423,34 +502,40 @@ function handleFrame(frame, bubble){
 }
 
 /* ---------- rendering ---------- */
-function renderSessionsPlaceholder(){}
 function addMsg(role, text){
   const t = document.getElementById("thread");
   const d = document.createElement("div");
-  d.className = "msg "+role;
-  const body = document.createElement("div"); body.className="body";
-  if(role==="assistant"){ d.innerHTML = "<div class='role'>assistant</div>"; }
-  else if(role==="user"){ d.innerHTML = "<div class='role'>you</div>"; }
-  else { d.innerHTML = "<div class='role'>"+role+"</div>"; }
+  const safe = safeRole(role);
+  d.className = "msg "+safe;
+  const label = document.createElement("div");
+  label.className = "role";
+  label.textContent = safe === "user" ? "you" : safe;
+  const body = document.createElement("div");
+  body.className="body";
+  d.append(label);
   d.appendChild(body); setBody(body, text);
   t.appendChild(d); t.scrollTop = t.scrollHeight;
   return d;
 }
 function renderThread(msgs){
   const t = document.getElementById("thread");
-  t.innerHTML = "";
+  t.replaceChildren();
   for(const m of msgs){
-    const role = (m.role||"system").toLowerCase();
+    const role = safeRole(m.role);
     const c = document.createElement("div");
-    c.className = "msg "+ (role==="tool"?"tool":role);
+    c.className = "msg "+role;
     if(role==="tool"){
-      c.innerHTML = "<div class='hdr'><span class='dot done'></span>"+escapeHtml(m.tool_name||m.name||"tool")+"</div>";
-      const b=document.createElement("div"); b.className="body"; setBody(b, str(m.content)); c.appendChild(b);
+      c.appendChild(toolHeader(m.tool_name || m.name || "tool", "done"));
     }else{
-      const lab = role==="assistant"?"assistant":role==="user"?"you":role;
-      c.innerHTML = "<div class='role'>"+lab+"</div>";
-      const b=document.createElement("div"); b.className="body"; setBody(b, str(m.content)); c.appendChild(b);
+      const label = document.createElement("div");
+      label.className = "role";
+      label.textContent = role === "user" ? "you" : role;
+      c.appendChild(label);
     }
+    const b=document.createElement("div");
+    b.className="body";
+    setBody(b, str(m.content));
+    c.appendChild(b);
     t.appendChild(c);
   }
   t.scrollTop = t.scrollHeight;
@@ -459,8 +544,11 @@ function addToolCard(name, cid, state, out){
   const t = document.getElementById("thread");
   const c = document.createElement("div");
   c.className="msg tool"; c.dataset.cid = cid||"";
-  c.innerHTML = "<div class='hdr'><span class='dot "+state+"'></span>"+escapeHtml(name)+"</div>";
-  const b=document.createElement("div"); b.className="body"; setBody(b, out); c.appendChild(b);
+  c.appendChild(toolHeader(name, state));
+  const b=document.createElement("div");
+  b.className="body";
+  setBody(b, out);
+  c.appendChild(b);
   t.appendChild(c); t.scrollTop=t.scrollHeight;
 }
 function updateToolCard(cid, state, out){
@@ -473,29 +561,33 @@ function updateToolCard(cid, state, out){
 
 /* ---------- skills / toolsets ---------- */
 async function loadSkills(){
-  const el=document.getElementById("skillsList"); el.innerHTML="<div style='color:var(--muted)'>Loading…</div>";
-  try{ const r=await api("/v1/skills"); const d=await r.json();
+  const el=document.getElementById("skillsList"); showLoading(el);
+  try{ const r=await api("/v1/skills"); if(!r.ok) throw new Error("HTTP "+r.status); const d=await r.json();
     const arr=Array.isArray(d)?d:(d.data||[]);
-    el.innerHTML="";
+    el.replaceChildren();
     for(const s of arr){ const c=document.createElement("div"); c.className="card";
-      c.innerHTML="<div class='n'>"+escapeHtml(s.name||s.id||"?")+"</div><div class='d'>"+escapeHtml(s.description||"")+"</div>";
+      const name=document.createElement("div"); name.className="n"; name.textContent=String(s.name||s.id||"?");
+      const description=document.createElement("div"); description.className="d"; description.textContent=String(s.description||"");
+      c.append(name, description);
       el.appendChild(c); }
-    if(!arr.length) el.innerHTML="<div style='color:var(--muted)'>None reported.</div>";
-  }catch(e){ el.innerHTML="<div style='color:var(--red)'>Failed: "+escapeHtml(e.message)+"</div>"; }
+    if(!arr.length) el.appendChild(messageElement("None reported."));
+  }catch(e){ showError(el, "Failed to load skills."); }
 }
 async function loadTools(){
-  const el=document.getElementById("toolsList"); el.innerHTML="<div style='color:var(--muted)'>Loading…</div>";
-  try{ const r=await api("/v1/toolsets"); const d=await r.json();
+  const el=document.getElementById("toolsList"); showLoading(el);
+  try{ const r=await api("/v1/toolsets"); if(!r.ok) throw new Error("HTTP "+r.status); const d=await r.json();
     const arr=Array.isArray(d)?d:(d.data||[]);
-    el.innerHTML="";
+    el.replaceChildren();
     for(const t of arr){ const c=document.createElement("div"); c.className="card";
-      const tools=(t.tools||[]).join(", ");
-      c.innerHTML="<div class='n'>"+escapeHtml(t.name||t.label||"?")+"</div>"+
-        "<div class='d'>"+escapeHtml(t.description||"")+(t.enabled!=null?(" · "+(t.enabled?"enabled":"disabled")):"")+"</div>"+
-        (tools?"<div class='tools'>"+escapeHtml(tools)+"</div>":"");
+      const name=document.createElement("div"); name.className="n"; name.textContent=String(t.name||t.label||"?");
+      const description=document.createElement("div"); description.className="d";
+      description.textContent=String(t.description||"")+(t.enabled!=null?(" · "+(t.enabled?"enabled":"disabled")):"");
+      c.append(name, description);
+      const tools=(t.tools||[]).map(x=>String(x)).join(", ");
+      if(tools){ const toolList=document.createElement("div"); toolList.className="tools"; toolList.textContent=tools; c.appendChild(toolList); }
       el.appendChild(c); }
-    if(!arr.length) el.innerHTML="<div style='color:var(--muted)'>None reported.</div>";
-  }catch(e){ el.innerHTML="<div style='color:var(--red)'>Failed: "+escapeHtml(e.message)+"</div>"; }
+    if(!arr.length) el.appendChild(messageElement("None reported."));
+  }catch(e){ showError(el, "Failed to load toolsets."); }
 }
 
 /* ---------- diagnostics ---------- */
@@ -503,7 +595,7 @@ async function runDiag(){
   const out=document.getElementById("diag"); out.textContent="Testing…";
   let lines=[];
   try{ const r=await api("/health"); lines.push("GET /health → "+r.status+(r.ok?" (ok)":"")); }catch(e){ lines.push("GET /health → "+e.message); }
-  try{ const r=await api("/v1/capabilities"); const d=await r.json();
+  try{ const r=await api("/v1/capabilities"); if(!r.ok) throw new Error("HTTP "+r.status); const d=await r.json();
     lines.push("GET /v1/capabilities → "+r.status);
     if(d.features){ const on=Object.entries(d.features).filter(([k,v])=>v).map(([k])=>k).join(", ");
       lines.push("features: "+(on||"(none advertised)")); }
@@ -512,13 +604,69 @@ async function runDiag(){
   out.textContent = lines.join("\n");
 }
 
-/* ---------- helpers ---------- */
-function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
-function str(x){ if(x==null) return ""; if(typeof x==="string") return x; if(Array.isArray(x)) return x.map(str).join("\n");
-  if(typeof x==="object"){ if(x.text) return str(x.text); if(x.content) return str(x.content); return JSON.stringify(x,null,2);} return String(x); }
-function relTime(ts){ if(!ts) return ""; const d=Date.now()/1000 - (typeof ts==="string"?Date.parse(ts)/1000:ts);
-  if(d<60) return "just now"; if(d<3600) return Math.floor(d/60)+"m ago"; if(d<86400) return Math.floor(d/3600)+"h ago"; return Math.floor(d/86400)+"d ago"; }
-function setBusy(b){ document.getElementById("ring").style.borderTopColor = b?"var(--green)":"var(--accent)"; }
+/* ---------- event wiring ---------- */
+function str(x){
+  if(x==null) return "";
+  if(typeof x==="string") return x;
+  if(Array.isArray(x)) return x.map(str).join("\n");
+  if(typeof x==="object"){
+    if(x.text) return str(x.text);
+    if(x.content) return str(x.content);
+    try{ return JSON.stringify(x,null,2); }catch{ return "[unrenderable value]"; }
+  }
+  return String(x);
+}
+function escapeHtml(value){
+  return String(value==null?"":value).replace(/[&<>"']/g, char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+}
+function relTime(ts){
+  if(!ts) return "";
+  const value = typeof ts === "string" ? Date.parse(ts)/1000 : Number(ts);
+  if(!Number.isFinite(value)) return "";
+  const d=Date.now()/1000 - value;
+  if(d<60) return "just now";
+  if(d<3600) return Math.floor(d/60)+"m ago";
+  if(d<86400) return Math.floor(d/3600)+"h ago";
+  return Math.floor(d/86400)+"d ago";
+}
+function safeRole(value){
+  const role = String(value||"system").toLowerCase();
+  return ["assistant","user","tool","system"].includes(role) ? role : "system";
+}
+function messageElement(text){
+  const el=document.createElement("div");
+  el.style.color="var(--muted)";
+  el.style.padding="10px";
+  el.textContent=String(text);
+  return el;
+}
+function showLoading(el){ el.replaceChildren(messageElement("Loading…")); }
+function showError(el, text){
+  const error=messageElement(text);
+  error.style.color="var(--red)";
+  el.replaceChildren(error);
+}
+function badgeElement(text, live){
+  const badge=document.createElement("span");
+  badge.className="badge"+(live?" live":"");
+  badge.textContent=String(text);
+  return badge;
+}
+function toolHeader(name, state){
+  const header=document.createElement("div");
+  header.className="hdr";
+  const dot=document.createElement("span");
+  dot.className="dot "+(state==="done"?"done":"run");
+  header.appendChild(dot);
+  const label=document.createElement("span");
+  label.textContent=String(name||"tool");
+  header.appendChild(label);
+  return header;
+}
+function setBusy(b){
+  document.getElementById("ring").style.borderTopColor = b?"var(--green)":"var(--accent)";
+  document.getElementById("ring").setAttribute("aria-busy", b ? "true" : "false");
+}
 
 /* ---------- markdown + Hermes-aware rendering ---------- */
 // Hermes wraps meta/context content in bracketed headers, e.g.
@@ -532,7 +680,6 @@ function splitSysNotes(text){
     const m = lines[i].match(SYSNOTE_RE);
     if(m && lines[i].startsWith("[")){
       const label = m[1]; const sub = m[2]||"";
-      // remainder of this same line after the closing ] belongs to the note body
       const after = lines[i].slice(m[0].length).replace(/^\s*/, "");
       const bodyLines = []; if(after) bodyLines.push(after); let j = i+1;
       while(j < lines.length){
@@ -574,7 +721,48 @@ function renderMarkdown(text){
   }
   return html;
 }
-function setBody(el, text){ el.innerHTML = renderMarkdown(text); }
+const SAFE_TAGS = new Set(["a","blockquote","br","code","del","div","em","h1","h2","h3","h4","h5","h6","hr","li","ol","p","pre","s","span","strong","table","tbody","td","tfoot","th","thead","tr","u","ul"]);
+const REMOVE_TAGS = new Set(["applet","audio","base","button","canvas","embed","form","iframe","input","link","math","meta","object","option","script","select","style","svg","template","textarea","video"]);
+const SAFE_ATTRS = new Set(["align","class","colspan","href","rowspan","title"]);
+function safeHref(value){
+  const raw=String(value||"").trim();
+  if(!raw) return null;
+  try{
+    const url=new URL(raw, document.baseURI);
+    if(["http:","https:","mailto:"].includes(url.protocol)) return url.href;
+  }catch{}
+  return null;
+}
+function sanitizeHtml(html){
+  const doc=new DOMParser().parseFromString(String(html||""), "text/html");
+  for(const el of Array.from(doc.body.querySelectorAll("*"))){
+    if(!el.isConnected) continue;
+    const tag=el.tagName.toLowerCase();
+    if(!SAFE_TAGS.has(tag)){
+      if(REMOVE_TAGS.has(tag)){ el.remove(); continue; }
+      while(el.firstChild) el.parentNode.insertBefore(el.firstChild, el);
+      el.remove();
+      continue;
+    }
+    for(const attr of Array.from(el.attributes)){
+      const name=attr.name.toLowerCase();
+      if(!SAFE_ATTRS.has(name)){ el.removeAttribute(attr.name); continue; }
+      if(name==="class" && !/^[A-Za-z0-9 _-]{1,80}$/.test(attr.value)){
+        el.removeAttribute(attr.name);
+      }else if(name==="href"){
+        const href=safeHref(attr.value);
+        if(!href) el.removeAttribute(attr.name);
+        else { el.setAttribute("href", href); el.setAttribute("rel", "noreferrer noopener"); }
+      }else if((name==="colspan" || name==="rowspan") && !/^[1-9][0-9]?$/.test(attr.value)){
+        el.removeAttribute(attr.name);
+      }else if(name==="align" && !["left","center","right"].includes(attr.value.toLowerCase())){
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+  return doc.body.innerHTML;
+}
+function setBody(el, text){ el.innerHTML = sanitizeHtml(renderMarkdown(text)); }
 
 /* ---------- helpers ---------- */
 document.getElementById("sendBtn").onclick = send;
@@ -593,18 +781,23 @@ document.getElementById("settingsBtn").onclick = ()=> { document.getElementById(
 document.getElementById("cfgCancel").onclick = ()=> document.getElementById("settingsModal").classList.add("hidden");
 document.getElementById("cfgSave").onclick = ()=> { cfg.url=document.getElementById("cfgUrl").value.trim(); cfg.key=document.getElementById("cfgKey").value.trim(); saveCfg(); document.getElementById("settingsModal").classList.add("hidden"); loadSessions(); };
 document.getElementById("diagBtn").onclick = runDiag;
+document.getElementById("logoutBtn").onclick = logout;
 
 /* ---------- service worker (PWA) ---------- */
 if("serviceWorker" in navigator){
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(()=>{});
+    navigator.serviceWorker.register("sw.js").catch(()=>console.warn("service worker unavailable"));
   });
 }
 
 /* ---------- boot with auth gate ---------- */
 (async function(){
-  const ok = await ensureAuth();
-  if(ok) boot();
+  try{
+    const ok = await ensureAuth();
+    if(ok) boot();
+  }catch{
+    showAuth("The application could not initialize. Start the proxy and try again.");
+  }
 })();
 </script>
 </body>

@@ -1,6 +1,7 @@
 # Never commit secrets
 .uplink-key.txt
 .uplink-pass.txt
+.uplink.pid
 
 # Cloudflared portable download
 bin/
@@ -8,3 +9,6 @@ bin/
 # Python
 __pycache__/
 *.pyc
+
+# Local experiments
+scratch/
