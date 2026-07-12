@@ -23,6 +23,12 @@ class UpstreamHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         UpstreamHandler.last_authorization = self.headers.get("Authorization")
+        if self.path == "/api/stream":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(b"event: run.completed\ndata: {}\n\n")
+            return
         self._send()
 
     def do_POST(self):
@@ -101,21 +107,47 @@ class ProxyIntegrationTests(unittest.TestCase):
         status, _, _ = self.request("GET", "/api/sessions", headers={"Cookie": cookie})
         self.assertEqual(status, 401)
 
+    def test_correct_passphrase_is_not_locked_out_by_failed_attempts(self):
+        for _ in range(proxy.AUTH_ATTEMPT_LIMIT + 1):
+            status, _, _ = self.request(
+                "POST",
+                "/__auth",
+                body=json.dumps({"passphrase": "wrong-passphrase"}),
+                headers={"Content-Type": "application/json"},
+            )
+        self.assertEqual(status, 429)
+        status, _, _ = self.request(
+            "POST",
+            "/__auth",
+            body=json.dumps({"passphrase": proxy.PASS}),
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(status, 204)
+
+    def test_event_stream_response_is_connection_delimited(self):
+        cookie = self.authenticate()
+        status, headers, body = self.request("GET", "/api/stream", headers={"Cookie": cookie})
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Connection"].lower(), "close")
+        self.assertIn(b"run.completed", body)
+
     def test_malformed_and_oversized_requests_are_rejected(self):
         cookie = self.authenticate()
-        status, _, _ = self.request(
+        status, headers, _ = self.request(
             "POST",
             "/api/sessions",
             headers={"Cookie": cookie, "Content-Length": "not-a-number"},
         )
         self.assertEqual(status, 400)
+        self.assertEqual(headers["Connection"].lower(), "close")
 
-        status, _, _ = self.request(
+        status, headers, _ = self.request(
             "POST",
             "/api/sessions",
             headers={"Cookie": cookie, "Content-Length": str(proxy.MAX_REQUEST_BODY + 1)},
         )
         self.assertEqual(status, 413)
+        self.assertEqual(headers["Connection"].lower(), "close")
 
     def test_static_path_cannot_escape_vendor_directory(self):
         status, _, _ = self.request("GET", "/vendor/%2e%2e/proxy.py")

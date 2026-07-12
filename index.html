@@ -212,7 +212,6 @@ const LS_KEY = "hermes-uplink-cfg";
 let cfg = loadCfg();
 let activeId = null;
 let streaming = false;
-let booted = false;
 
 function loadCfg(){
   try{
@@ -322,7 +321,6 @@ function scheduleProbe(){
 
 /* ---------- boot ---------- */
 function boot(){
-  booted = true;
   probe();
   loadSessions();
 }

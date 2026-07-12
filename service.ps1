@@ -19,7 +19,14 @@ if (-not [int]::TryParse($rawPid, [ref]$targetPid) -or $targetPid -le 0) {
 }
 
 $process = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid"
-if (-not $process -or $process.CommandLine -notmatch "proxy\.py") {
+$commandLine = if ($process) { [string]$process.CommandLine } else { "" }
+$scriptPattern = '(?i)(^|\s)["'']?proxy\.py["'']?(\s|$)'
+$portPattern = '(?i)--port\s+["'']?' + [regex]::Escape([string]$Port) + '["'']?(\s|$)'
+$isHermesProxy = $process -and
+    $process.Name -match '^(pythonw?|py)(\.exe)?$' -and
+    $commandLine -match $scriptPattern -and
+    $commandLine -match $portPattern
+if (-not $isHermesProxy) {
     if ($Action -eq "status") { Write-Output "[!] Not running (run: launch.bat start)" }
     else { Write-Output "[!] Refused to stop a process that was not identified as Hermes Uplink." }
     exit 1

@@ -18,7 +18,7 @@ import urllib.parse
 import urllib.request
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from threading import Lock, Semaphore
+from threading import BoundedSemaphore, Lock, Semaphore, Thread
 
 
 UPSTREAM = "http://127.0.0.1:8642"
@@ -31,6 +31,7 @@ AUTH_SESSION_TTL = 12 * 60 * 60
 AUTH_ATTEMPT_WINDOW = 60
 AUTH_ATTEMPT_LIMIT = 10
 MAX_ACTIVE_PROXY_REQUESTS = 32
+MAX_ACTIVE_CONNECTIONS = 128
 REQUEST_HEADER_TIMEOUT = 30
 SESSION_COOKIE = "hermes_uplink_session"
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -42,7 +43,7 @@ PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 # when that script changes; the static client otherwise has no CSP exception.
 CONTENT_SECURITY_POLICY = (
     "default-src 'self'; "
-    "script-src 'self' 'sha256-sGOtit+FZm6+66TsEzQjU80YG9vXEP0qHf/qcuTimx0='; "
+    "script-src 'self' 'sha256-yZsm+kXirZWfrEIl6//bIsoNMALG0mQVjlCP8YBrrCg='; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self'; "
     "connect-src 'self' https: http://127.0.0.1:* http://localhost:*; "
@@ -98,6 +99,34 @@ class UplinkServer(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
     request_queue_size = 64
+    connection_slots = BoundedSemaphore(MAX_ACTIVE_CONNECTIONS)
+
+    def process_request(self, request, client_address):
+        if not self.connection_slots.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        thread = Thread(
+            target=self._process_request_thread,
+            args=(request, client_address),
+            daemon=self.daemon_threads,
+        )
+        try:
+            thread.start()
+        except BaseException:
+            self.shutdown_request(request)
+            self.connection_slots.release()
+            raise
+
+    def _process_request_thread(self, request, client_address):
+        try:
+            self.finish_request(request, client_address)
+        except Exception:
+            self.handle_error(request, client_address)
+        finally:
+            try:
+                self.shutdown_request(request)
+            finally:
+                self.connection_slots.release()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -133,36 +162,35 @@ class Handler(BaseHTTPRequestHandler):
 
     def _read_body(self, maximum):
         if self.headers.get("Transfer-Encoding"):
-            self._send(501, "text/plain; charset=utf-8", b"chunked request bodies are not supported")
-            return READ_ERROR
+            return self._reject_body(501, b"chunked request bodies are not supported")
         raw_length = self.headers.get("Content-Length")
         if raw_length in (None, ""):
             return b""
         try:
             length = int(raw_length)
         except (TypeError, ValueError):
-            self._send(400, "text/plain; charset=utf-8", b"invalid content length")
-            return READ_ERROR
+            return self._reject_body(400, b"invalid content length")
         if length < 0:
-            self._send(400, "text/plain; charset=utf-8", b"invalid content length")
-            return READ_ERROR
+            return self._reject_body(400, b"invalid content length")
         if length > maximum:
-            self._send(413, "text/plain; charset=utf-8", b"request body too large")
-            return READ_ERROR
+            return self._reject_body(413, b"request body too large")
 
         previous_timeout = self.connection.gettimeout()
         try:
             self.connection.settimeout(30)
             body = self.rfile.read(length)
         except socket.timeout:
-            self._send(408, "text/plain; charset=utf-8", b"request body timed out")
-            return READ_ERROR
+            return self._reject_body(408, b"request body timed out")
         finally:
             self.connection.settimeout(previous_timeout)
         if len(body) != length:
-            self._send(400, "text/plain; charset=utf-8", b"incomplete request body")
-            return READ_ERROR
+            return self._reject_body(400, b"incomplete request body")
         return body
+
+    def _reject_body(self, code, body):
+        self.close_connection = True
+        self._send(code, "text/plain; charset=utf-8", body, {"Connection": "close"})
+        return READ_ERROR
 
     def _client_id(self):
         return self.client_address[0] if self.client_address else "unknown"
@@ -254,15 +282,6 @@ class Handler(BaseHTTPRequestHandler):
         if not PASS:
             self._send(503, "text/plain; charset=utf-8", b"authentication is not configured")
             return
-        limited, retry_after = self._auth_rate_limited()
-        if limited:
-            self._send(
-                429,
-                "text/plain; charset=utf-8",
-                b"too many authentication attempts",
-                {"Retry-After": str(retry_after)},
-            )
-            return
         body = self._read_body(MAX_AUTH_BODY)
         if body is READ_ERROR:
             return
@@ -273,6 +292,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         passphrase = payload.get("passphrase") if isinstance(payload, dict) else None
         if not isinstance(passphrase, str) or not secrets.compare_digest(passphrase, PASS):
+            limited, retry_after = self._auth_rate_limited()
+            if limited:
+                self._send(
+                    429,
+                    "text/plain; charset=utf-8",
+                    b"too many authentication attempts",
+                    {"Retry-After": str(retry_after)},
+                )
+                return
             self._send(401, "text/plain; charset=utf-8", b"incorrect passphrase")
             return
         self._auth_success()
@@ -394,17 +422,24 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", content_type)
             self.send_header("Cache-Control", "no-store")
             content_length = response.headers.get("Content-Length")
-            if content_length and "text/event-stream" not in content_type:
+            is_event_stream = "text/event-stream" in content_type.lower()
+            if content_length and not is_event_stream:
                 self.send_header("Content-Length", content_length)
+            else:
+                # Without a length or chunked framing, connection close is the
+                # only valid HTTP/1.1 delimiter for streamed/dechunked bodies.
+                self.send_header("Connection", "close")
+                self.close_connection = True
             self.end_headers()
             self.connection.settimeout(UPSTREAM_TIMEOUT)
             try:
-                while True:
-                    chunk = getattr(response, "read1", response.read)(4096)
-                    if not chunk:
-                        break
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
+                if self.command != "HEAD":
+                    while True:
+                        chunk = getattr(response, "read1", response.read)(4096)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 LOGGER.debug("client disconnected during upstream stream")
             except Exception:

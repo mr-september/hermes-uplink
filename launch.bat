@@ -21,14 +21,19 @@ REM =====================================================================
 setlocal
 cd /d "%~dp0"
 
-if "%HERMES_PORT%"=="" set HERMES_PORT=8787
+if not defined HERMES_PORT set "HERMES_PORT=8787"
 set "HERMES_BIND=127.0.0.1"
+call :validate_port
+if errorlevel 1 (
+  pause
+  exit /b 1
+)
 
-if /i "%1"=="install"   call :svc install & goto :eof
-if /i "%1"=="uninstall" call :svc uninstall & goto :eof
-if /i "%1"=="start"     call :svc start & goto :eof
-if /i "%1"=="stop"      call :svc stop & goto :eof
-if /i "%1"=="status"    call :svc status & goto :eof
+if /i "%~1"=="install"   call :svc install & goto :eof
+if /i "%~1"=="uninstall" call :svc uninstall & goto :eof
+if /i "%~1"=="start"     call :svc start & goto :eof
+if /i "%~1"=="stop"      call :svc stop & goto :eof
+if /i "%~1"=="status"    call :svc status & goto :eof
 
 REM ---- verify core command-line environments ----
 where python >nul 2>&1
@@ -65,6 +70,13 @@ set "HERMES_API_KEY="
 set /p HERMES_API_KEY=<.uplink-key.txt
 if not defined HERMES_API_KEY (
   echo [!] API key file is empty.
+  pause
+  exit /b 1
+)
+set "API_KEY_VALID="
+for /f "delims=" %%R in ('powershell -NoProfile -Command "$k=(Get-Content -LiteralPath '.uplink-key.txt' -Raw).Trim(); if($k -match '^[A-Za-z0-9_-]{32}$'){ 'OK' }"') do set "API_KEY_VALID=%%R"
+if /i not "%API_KEY_VALID%"=="OK" (
+  echo [!] API key file has an invalid format; refusing to pass it to Hermes.
   pause
   exit /b 1
 )
@@ -106,7 +118,7 @@ echo  Pass:  %UPLINK_PASSPHRASE%   (type on first phone connect)
 echo  For phone access:  run tunnel.bat for an HTTPS URL
 echo ============================================================
 echo.
-set "HERMES_UPSTREAM=http://127.0.0.1:8642"
+if not defined HERMES_UPSTREAM set "HERMES_UPSTREAM=http://127.0.0.1:8642"
 python proxy.py --host "%HERMES_BIND%" --port "%HERMES_PORT%"
 if errorlevel 1 echo [!] Hermes Uplink stopped with an error.
 pause
@@ -141,4 +153,12 @@ if /i not "%1"=="status" goto :eof
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0service.ps1" -Action status -Port %HERMES_PORT%
 goto :eof
 
+:validate_port
+set "PORT_VALID="
+for /f "delims=" %%R in ('powershell -NoProfile -Command "$p=$env:HERMES_PORT; if($p -match '^[0-9]+$' -and [int]$p -ge 1 -and [int]$p -le 65535){ 'OK' }"') do set "PORT_VALID=%%R"
+if /i not "%PORT_VALID%"=="OK" (
+  echo [!] HERMES_PORT must be a decimal TCP port from 1 through 65535.
+  exit /b 1
+)
+exit /b 0
 
