@@ -1,0 +1,611 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Hermes Uplink</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#0d1117" />
+<style>
+  :root{
+    --bg:#0d1117; --bg2:#161b22; --bg3:#21262d; --border:#30363d;
+    --text:#e6edf3; --muted:#8b949e; --accent:#f0a500; --accent2:#58a6ff;
+    --green:#3fb950; --red:#f85149; --purple:#bc8cff;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100vh; height:100dvh}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       background:var(--bg); color:var(--text); display:flex; height:100vh; height:100dvh; overflow:hidden}
+  a{color:var(--accent2)}
+  button{font:inherit; color:var(--text); background:var(--bg3); border:1px solid var(--border);
+         border-radius:8px; padding:6px 10px; cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent); color:#1a1300; border-color:var(--accent); font-weight:600}
+  input,textarea{font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--border);
+         border-radius:8px; padding:8px; width:100%}
+  .hidden{display:none !important}
+
+  /* layout */
+  #sidebar{width:280px; min-width:280px; background:var(--bg2); border-right:1px solid var(--border);
+           display:flex; flex-direction:column}
+  #main{flex:1; display:flex; flex-direction:column; min-width:0}
+  #right{width:300px; min-width:300px; background:var(--bg2); border-left:1px solid var(--border);
+         display:flex; flex-direction:column; overflow:auto}
+
+  .bar{display:flex; align-items:center; gap:8px; padding:10px; border-bottom:1px solid var(--border)}
+  .bar h1{font-size:15px; margin:0; flex:1; letter-spacing:.3px}
+  .toolbtn{background:transparent; border:1px solid var(--border); width:34px; height:34px; padding:0}
+
+  #search{padding:8px 10px}
+  #sessionList{flex:1; overflow:auto; padding:0 8px 8px}
+  .sess{padding:9px 10px; border-radius:8px; cursor:pointer; border:1px solid transparent; margin-bottom:4px}
+  .sess:hover{background:var(--bg3)}
+  .sess.active{background:var(--bg3); border-color:var(--accent)}
+  .sess .t{font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .sess .m{font-size:11px; color:var(--muted); margin-top:2px; display:flex; gap:6px; flex-wrap:wrap}
+  .badge{font-size:10px; padding:1px 6px; border-radius:10px; background:var(--bg); border:1px solid var(--border); color:var(--muted)}
+  .badge.live{color:var(--green); border-color:var(--green)}
+
+  #thread{flex:1; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:12px}
+  .msg{border-radius:10px; padding:10px 12px; max-width:92%; line-height:1.5}
+  .msg.user{align-self:flex-end; background:#1f6feb22; border:1px solid #1f6feb55}
+  .msg.assistant{align-self:flex-start; background:var(--bg2); border:1px solid var(--border)}
+  .msg.system{align-self:flex-start; background:#6e76811a; color:var(--muted); font-size:12px; border:1px dashed var(--border)}
+  .msg.tool{align-self:flex-start; background:#21262d99; border:1px solid var(--border); font-size:12px; width:92%}
+  .msg .role{font-size:10px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); margin-bottom:4px}
+  .msg pre{background:#0b0f14; border:1px solid var(--border); border-radius:6px; padding:8px; overflow:auto; font-size:12px}
+  .tool .hdr{display:flex; align-items:center; gap:6px; font-weight:600; color:var(--purple)}
+  .tool .body{margin-top:6px; color:var(--text); white-space:pre-wrap; word-break:break-word}
+
+  /* rendered markdown inside .body */
+  .body{line-height:1.55; overflow-wrap:anywhere}
+  .body > :first-child{margin-top:0}
+  .body > :last-child{margin-bottom:0}
+  .body p{margin:0 0 10px}
+  .body ul,.body ol{margin:0 0 10px; padding-left:22px}
+  .body li{margin:2px 0}
+  .body h1,.body h2,.body h3,.body h4{margin:14px 0 8px; line-height:1.3}
+  .body h1{font-size:1.3em} .body h2{font-size:1.18em} .body h3{font-size:1.06em}
+  .body a{color:var(--accent2); text-decoration:underline}
+  .body code{background:#0b0f14; border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:.9em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .body pre{background:#0b0f14; border:1px solid var(--border); border-radius:8px; padding:12px; overflow:auto; margin:0 0 10px}
+  .body pre code{background:none; border:none; padding:0; font-size:.88em; white-space:pre}
+  .body blockquote{margin:0 0 10px; padding:4px 12px; border-left:3px solid var(--border); color:var(--muted)}
+  .body table{border-collapse:collapse; margin:0 0 10px; width:100%; font-size:.92em; display:block; overflow:auto}
+  .body th,.body td{border:1px solid var(--border); padding:5px 9px; text-align:left}
+  .body th{background:var(--bg3); font-weight:600}
+  .body hr{border:none; border-top:1px solid var(--border); margin:12px 0}
+
+  /* Hermes meta/context callouts (e.g. [CONTEXT COMPACTION — ...]) */
+  .sysnote{margin:0 0 10px; border:1px dashed var(--border); border-radius:8px; background:#6e76811a; font-size:.9em}
+  .sysnote-h{font-weight:600; color:var(--muted); padding:5px 10px; font-size:.82em; text-transform:uppercase; letter-spacing:.4px}
+  .sysnote-b{padding:0 10px 8px; color:var(--muted)}
+  .sysnote-b > :last-child{margin-bottom:0}
+
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block}
+  .dot.run{background:var(--accent); animation:pulse 1s infinite}
+  .dot.done{background:var(--green)}
+  @keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
+
+  #composer{display:flex; gap:8px; padding:10px; border-top:1px solid var(--border); align-items:flex-end}
+  #composer textarea{min-height:44px; max-height:160px; resize:vertical}
+  #ring{width:34px;height:34px;border-radius:50%;border:3px solid var(--border);
+        border-top-color:var(--accent); flex:none; position:relative}
+  #ring span{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:9px; color:var(--muted)}
+
+  /* right panel */
+  #right .tab{display:flex; border-bottom:1px solid var(--border)}
+  #right .tab button{flex:1; border-radius:0; border:none; border-bottom:2px solid transparent; background:transparent}
+  #right .tab button.on{border-bottom-color:var(--accent); color:var(--accent)}
+  .list{padding:10px; display:flex; flex-direction:column; gap:8px}
+  .card{border:1px solid var(--border); border-radius:8px; padding:8px 10px; background:var(--bg)}
+  .card .n{font-weight:600; font-size:13px}
+  .card .d{font-size:11px; color:var(--muted); margin-top:3px}
+  .card .tools{font-size:10px; color:var(--accent2); margin-top:4px; word-break:break-word}
+
+  /* modal */
+  .modal{position:fixed; inset:0; background:#000a; display:flex; align-items:center; justify-content:center; z-index:50}
+  .modal .box{background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:18px; width:min(420px,92vw)}
+  .modal label{display:block; font-size:12px; color:var(--muted); margin:12px 0 4px}
+  .diag{margin-top:12px; font-size:11px; color:var(--muted); white-space:pre-wrap}
+
+  /* On desktop the sidebar is always visible, so the hamburger (mobile-only drawer
+     toggle) is a no-op there — hide it to avoid a dead control. */
+  @media (min-width:761px){ #menuBtn{ display:none } }
+
+  /* mobile */
+  @media (max-width:760px){
+    #sidebar{position:fixed; top:0; left:0; z-index:40; height:100%; height:100dvh;
+             padding-top:env(safe-area-inset-top); transform:translateX(-100%); transition:.2s}
+    #sidebar.open{transform:none}
+    #right{position:fixed; top:0; right:0; z-index:40; height:100%; height:100dvh;
+           padding-top:env(safe-area-inset-top); transform:translateX(100%); transition:.2s}
+    #right.open{transform:none}
+    .scrim{position:fixed; inset:0; background:#0008; z-index:35}
+    #main > .bar{ padding-top:calc(10px + env(safe-area-inset-top)) }
+    #composer{ padding-bottom:calc(10px + env(safe-area-inset-bottom)) }
+  }
+</style>
+</head>
+<body>
+  <div id="sidebar">
+    <div class="bar">
+      <h1>Hermes Uplink</h1>
+      <button class="toolbtn" id="settingsBtn" title="Settings">&#9881;</button>
+    </div>
+    <div id="search"><input id="searchInput" placeholder="Search sessions…" /></div>
+    <div class="bar" style="border:none;padding:0 10px 6px">
+      <button class="primary" id="newBtn" style="flex:1">+ New chat</button>
+    </div>
+    <div id="sessionList"></div>
+  </div>
+
+  <div id="main">
+    <div class="bar">
+      <button class="toolbtn" id="menuBtn" title="Sessions">&#9776;</button>
+      <button class="toolbtn" id="infoBtn" title="Capabilities">&#9432;</button>
+      <div style="flex:1;font-size:13px;color:var(--muted)" id="activeTitle">No session — start or pick one</div>
+      <span id="statusDot" class="dot" title="Connection status"></span>
+      <button class="toolbtn" id="refreshBtn" title="Refresh (or just switch to this tab)">&#8635;</button>
+      <button class="toolbtn" id="rightBtn" title="Skills / Tools">&#9881;</button>
+    </div>
+    <div id="thread"><div style="margin:auto;color:var(--muted);text-align:center">
+      Pick a session on the left, or start a new chat.<br/>All sessions live on your home desktop.</div></div>
+    <div id="composer">
+      <textarea id="input" placeholder="Message the agent… (Enter to send, Shift+Enter newline)"></textarea>
+      <button class="primary" id="sendBtn">Send</button>
+      <div id="ring" title="Tokens"><span id="ringTxt"></span></div>
+    </div>
+  </div>
+
+  <div id="right">
+    <div class="tab">
+      <button id="tabSkills" class="on">Skills</button>
+      <button id="tabTools">Toolsets</button>
+    </div>
+    <div class="list" id="skillsList"></div>
+    <div class="list hidden" id="toolsList"></div>
+  </div>
+
+  <!-- settings modal -->
+  <div class="modal hidden" id="settingsModal">
+    <div class="box">
+      <h3 style="margin:0 0 4px">Connection</h3>
+      <div style="font-size:12px;color:var(--muted)">Leave Server URL empty to use same-origin (proxy mode).</div>
+      <label>Server base URL (e.g. https://hermes.example.com or http://host:8642)</label>
+      <input id="cfgUrl" placeholder="(same origin)" />
+      <label>API key (Bearer) — only needed in direct mode</label>
+      <input id="cfgKey" type="password" placeholder="(injected by proxy in same-origin mode)" />
+      <div class="diag" id="diag"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+        <button id="diagBtn">Test</button>
+        <button id="cfgCancel">Cancel</button>
+        <button class="primary" id="cfgSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="scrim hidden" id="scrim"></div>
+
+  <!-- passphrase gate (one-time per device) -->
+  <div class="modal hidden" id="authModal">
+    <div class="box">
+      <h3 style="margin:0 0 4px">Hermes Uplink</h3>
+      <div style="font-size:12px;color:var(--muted)">Enter the passphrase shown on your desktop launcher.</div>
+      <label>Passphrase</label>
+      <input id="authInput" type="password" placeholder="••••••••" autocomplete="off" />
+      <div class="diag" id="authDiag"></div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+        <button class="primary" id="authSubmit">Connect</button>
+      </div>
+    </div>
+  </div>
+
+<!-- vendored offline markdown renderer (no CDN); from marked v17 (MIT) -->
+<script src="vendor/marked.umd.js"></script>
+<script>
+const LS_KEY = "hermes-uplink-cfg";
+let cfg = loadCfg();
+let activeId = null;
+let streaming = false;
+let gated = false; // server requires passphrase
+
+function loadCfg(){ try{ return JSON.parse(localStorage.getItem(LS_KEY))||{} }catch{ return {} } }
+function saveCfg(){ localStorage.setItem(LS_KEY, JSON.stringify(cfg)) }
+function base(){ return (cfg.url||"").replace(/\/+$/,"") }
+
+async function api(path, opts={}){
+  const url = base() + path;
+  const h = Object.assign({}, opts.headers||{});
+  if(cfg.key) h["Authorization"] = "Bearer " + cfg.key;
+  if(cfg.token) h["x-uplink-token"] = cfg.token;   // one-time passphrase token
+  return fetch(url, Object.assign({}, opts, {headers:h, credentials:"same-origin"}));
+}
+
+/* ---------- auth gate ---------- */
+async function ensureAuth(){
+  // If we already hold a token, the cookie is likely set; just try a live call.
+  const r = await fetch(base() + "/api/sessions?limit=1", {credentials:"same-origin"});
+  if(r.status !== 401) return true;
+  // 401 -> need passphrase
+  gated = true;
+  document.getElementById("authModal").classList.remove("hidden");
+  return false;
+}
+function submitAuth(){
+  const v = document.getElementById("authInput").value.trim();
+  if(!v){ document.getElementById("authDiag").textContent = "Enter the passphrase."; return; }
+  fetch(base() + "/__auth?t=" + encodeURIComponent(v), {credentials:"same-origin"})
+    .then(r => { if(r.status===204){ cfg.token=v; saveCfg(); document.getElementById("authModal").classList.add("hidden"); boot(); }
+                 else { document.getElementById("authDiag").textContent = "Incorrect passphrase."; } })
+    .catch(e => { document.getElementById("authDiag").textContent = "Error: "+e.message; });
+}
+document.getElementById("authSubmit").onclick = submitAuth;
+document.getElementById("authInput").addEventListener("keydown", e=>{ if(e.key==="Enter") submitAuth(); });
+
+/* ---------- status dot + silent retry ---------- */
+let retryTimer = null;
+function setStatus(state){
+  const d = document.getElementById("statusDot");
+  d.className = "dot " + (state==="ok"?"done":state==="bad"?"run":"");
+  d.title = state==="ok" ? "Connected" : state==="bad" ? "Reconnecting…" : "Connecting…";
+}
+async function probe(){
+  try{
+    const r = await fetch(base()+"/health", {credentials:"same-origin"});
+    setStatus(r.ok ? "ok" : "bad");
+  }catch{ setStatus("bad"); }
+}
+function scheduleProbe(){
+  clearTimeout(retryTimer);
+  retryTimer = setTimeout(probe, 8000); // silent; no modal
+}
+
+/* ---------- boot ---------- */
+function boot(){
+  probe(); scheduleProbe();
+  loadSessions();
+}
+
+/* ---------- manual / on-focus refresh ----------
+   We deliberately do NOT run a background poller (battery). Instead we refresh
+   whenever the user (a) clicks the refresh button, or (b) returns to this tab /
+   focuses the window. With the shared session store, this makes both edge devices
+   converge within a second of you actually looking at the app — which matches the
+   "switch devices a few times a day" pattern. */
+let refreshing = false;
+async function refresh(){
+  if(refreshing || !activeId) { await loadSessions(); return; }
+  refreshing = true;
+  const btn = document.getElementById("refreshBtn");
+  btn.style.opacity = "0.5";
+  try{
+    await loadSessions();
+    const r = await api("/api/sessions/"+encodeURIComponent(activeId)+"/messages");
+    if(r.ok){ const d = await r.json(); const msgs = d.data || d.messages || (Array.isArray(d)?d:[]); renderThread(msgs); }
+  }finally{
+    btn.style.opacity = "1";
+    refreshing = false;
+  }
+}
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) refresh(); });
+window.addEventListener("focus", refresh);
+
+/* ---------- sessions ---------- */
+async function loadSessions(){
+  const el = document.getElementById("sessionList");
+  el.innerHTML = "<div style='color:var(--muted);padding:10px'>Loading…</div>";
+  try{
+    const r = await api("/api/sessions?limit=200&include_children=true");
+    if(r.status === 401){ gated=true; document.getElementById("authModal").classList.remove("hidden"); return; }
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const data = await r.json();
+    const sessions = Array.isArray(data) ? data : (data.sessions||data.data||[]);
+    renderSessions(sessions);
+  }catch(e){ el.innerHTML = "<div style='color:var(--red);padding:10px'>Failed: "+escapeHtml(e.message)+"</div>"; }
+}
+
+function renderSessions(sessions){
+  const el = document.getElementById("sessionList");
+  const q = (document.getElementById("searchInput").value||"").toLowerCase();
+  el.innerHTML = "";
+  if(!sessions.length){ el.innerHTML = "<div style='color:var(--muted);padding:10px'>No sessions.</div>"; return; }
+  const sorted = sessions.slice().sort((a,b)=> (b.updated_at||b.last_active||0)-(a.updated_at||a.last_active||0));
+  for(const s of sorted){
+    const title = s.title || s.preview || s.id || "(untitled)";
+    if(q && !title.toLowerCase().includes(q) && !(s.source||"").toLowerCase().includes(q)) continue;
+    const div = document.createElement("div");
+    div.className = "sess" + (s.id===activeId?" active":"");
+    const live = s.active ? "<span class='badge live'>live</span>" : "";
+    div.innerHTML = "<div class='t'>"+escapeHtml(title)+"</div>"+
+      "<div class='m'><span class='badge'>"+escapeHtml(s.source||"cli")+"</span>"+live+
+      "<span>"+(s.message_count||0)+" msgs</span>"+
+      "<span>"+escapeHtml(relTime(s.updated_at||s.last_active))+"</span></div>";
+    div.onclick = ()=> openSession(s.id, title);
+    el.appendChild(div);
+  }
+}
+
+async function openSession(id, title){
+  activeId = id;
+  document.getElementById("activeTitle").textContent = title || id;
+  renderSessionsPlaceholder();
+  try{
+    const r = await api("/api/sessions/"+encodeURIComponent(id)+"/messages");
+    const data = r.ok ? await r.json() : {data:[]};
+    const msgs = data.data || data.messages || (Array.isArray(data)?data:[]);
+    renderThread(msgs);
+  }catch(e){ renderThread([]); addMsg("system","Could not load history: "+e.message); }
+  document.querySelectorAll(".sess").forEach(x=>x.classList.remove("active"));
+  loadSessions();
+}
+
+async function newSession(){
+  try{
+    const r = await api("/api/sessions", {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"});
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    const s = await r.json();
+    const id = s.id || (s.session&&s.session.id);
+    if(!id) throw new Error("no id in response");
+    await loadSessions();
+    openSession(id, "New chat");
+  }catch(e){ alert("New chat failed: "+e.message); }
+}
+
+/* ---------- chat / streaming ---------- */
+async function send(){
+  if(streaming) return;
+  const ta = document.getElementById("input");
+  const text = ta.value.trim();
+  if(!text) return;
+  if(!activeId){ await newSession(); }
+  if(!activeId) return;
+  ta.value = "";
+  addMsg("user", text);
+  streaming = true; setBusy(true);
+  const bubble = addMsg("assistant", "");
+  let acc = "";
+  try{
+    const r = await api("/api/sessions/"+encodeURIComponent(activeId)+"/chat/stream", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({input:text})
+    });
+    if(!r.ok) throw new Error("HTTP "+r.status+" "+await r.text());
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while(true){
+      const {done,value} = await reader.read();
+      if(done) break;
+      buf += dec.decode(value, {stream:true});
+      let idx;
+      while((idx = buf.indexOf("\n\n")) >= 0){
+        const frame = buf.slice(0, idx); buf = buf.slice(idx+2);
+        handleFrame(frame, bubble);
+      }
+    }
+    if(buf.trim()) handleFrame(buf, bubble);
+  }catch(e){
+    bubble.querySelector(".body").textContent += "\n[error] "+e.message;
+  }finally{
+    streaming = false; setBusy(false);
+    openSession(activeId, document.getElementById("activeTitle").textContent);
+  }
+}
+
+function handleFrame(frame, bubble){
+  let event="message", data="";
+  for(const line of frame.split("\n")){
+    if(line.startsWith("event:")) event = line.slice(6).trim();
+    else if(line.startsWith("data:")) data += line.slice(5).trim();
+  }
+  let obj=null; try{ obj = JSON.parse(data) }catch{}
+  if(event==="assistant.delta"){
+    const t = obj && obj.text!=null ? obj.text : data;
+    if(!bubble._raw) bubble._raw = "";
+    bubble._raw += t;
+    setBody(bubble.querySelector(".body"), bubble._raw);
+    bubble.scrollIntoView({block:"end"});
+  }else if(event==="tool.started"){
+    const name = (obj&&obj.name)||"tool";
+    addToolCard(name, obj&&obj.call_id, "run", "");
+  }else if(event==="tool.completed"){
+    const cid = obj&&obj.call_id; const out = obj&&obj.output!=null?obj.output:"";
+    updateToolCard(cid, "done", typeof out==="string"?out:JSON.stringify(out,null,2));
+  }else if(event==="run.completed"){
+    /* server will re-sync history via openSession */
+  }
+  // fallback: if no structured events, but data is plain text
+  if(event==="message" && data && !obj){ bubble.querySelector(".body").textContent += data; }
+}
+
+/* ---------- rendering ---------- */
+function renderSessionsPlaceholder(){}
+function addMsg(role, text){
+  const t = document.getElementById("thread");
+  const d = document.createElement("div");
+  d.className = "msg "+role;
+  const body = document.createElement("div"); body.className="body";
+  if(role==="assistant"){ d.innerHTML = "<div class='role'>assistant</div>"; }
+  else if(role==="user"){ d.innerHTML = "<div class='role'>you</div>"; }
+  else { d.innerHTML = "<div class='role'>"+role+"</div>"; }
+  d.appendChild(body); setBody(body, text);
+  t.appendChild(d); t.scrollTop = t.scrollHeight;
+  return d;
+}
+function renderThread(msgs){
+  const t = document.getElementById("thread");
+  t.innerHTML = "";
+  for(const m of msgs){
+    const role = (m.role||"system").toLowerCase();
+    const c = document.createElement("div");
+    c.className = "msg "+ (role==="tool"?"tool":role);
+    if(role==="tool"){
+      c.innerHTML = "<div class='hdr'><span class='dot done'></span>"+escapeHtml(m.tool_name||m.name||"tool")+"</div>";
+      const b=document.createElement("div"); b.className="body"; setBody(b, str(m.content)); c.appendChild(b);
+    }else{
+      const lab = role==="assistant"?"assistant":role==="user"?"you":role;
+      c.innerHTML = "<div class='role'>"+lab+"</div>";
+      const b=document.createElement("div"); b.className="body"; setBody(b, str(m.content)); c.appendChild(b);
+    }
+    t.appendChild(c);
+  }
+  t.scrollTop = t.scrollHeight;
+}
+function addToolCard(name, cid, state, out){
+  const t = document.getElementById("thread");
+  const c = document.createElement("div");
+  c.className="msg tool"; c.dataset.cid = cid||"";
+  c.innerHTML = "<div class='hdr'><span class='dot "+state+"'></span>"+escapeHtml(name)+"</div>";
+  const b=document.createElement("div"); b.className="body"; setBody(b, out); c.appendChild(b);
+  t.appendChild(c); t.scrollTop=t.scrollHeight;
+}
+function updateToolCard(cid, state, out){
+  const cards = document.querySelectorAll(".msg.tool");
+  for(const c of cards){
+    if(cid && c.dataset.cid===cid){ c.querySelector(".dot").className="dot "+state; setBody(c.querySelector(".body"), out); return; }
+  }
+  if(cards.length){ const last=cards[cards.length-1]; last.querySelector(".dot").className="dot "+state; setBody(last.querySelector(".body"), out); }
+}
+
+/* ---------- skills / toolsets ---------- */
+async function loadSkills(){
+  const el=document.getElementById("skillsList"); el.innerHTML="<div style='color:var(--muted)'>Loading…</div>";
+  try{ const r=await api("/v1/skills"); const d=await r.json();
+    const arr=Array.isArray(d)?d:(d.data||[]);
+    el.innerHTML="";
+    for(const s of arr){ const c=document.createElement("div"); c.className="card";
+      c.innerHTML="<div class='n'>"+escapeHtml(s.name||s.id||"?")+"</div><div class='d'>"+escapeHtml(s.description||"")+"</div>";
+      el.appendChild(c); }
+    if(!arr.length) el.innerHTML="<div style='color:var(--muted)'>None reported.</div>";
+  }catch(e){ el.innerHTML="<div style='color:var(--red)'>Failed: "+escapeHtml(e.message)+"</div>"; }
+}
+async function loadTools(){
+  const el=document.getElementById("toolsList"); el.innerHTML="<div style='color:var(--muted)'>Loading…</div>";
+  try{ const r=await api("/v1/toolsets"); const d=await r.json();
+    const arr=Array.isArray(d)?d:(d.data||[]);
+    el.innerHTML="";
+    for(const t of arr){ const c=document.createElement("div"); c.className="card";
+      const tools=(t.tools||[]).join(", ");
+      c.innerHTML="<div class='n'>"+escapeHtml(t.name||t.label||"?")+"</div>"+
+        "<div class='d'>"+escapeHtml(t.description||"")+(t.enabled!=null?(" · "+(t.enabled?"enabled":"disabled")):"")+"</div>"+
+        (tools?"<div class='tools'>"+escapeHtml(tools)+"</div>":"");
+      el.appendChild(c); }
+    if(!arr.length) el.innerHTML="<div style='color:var(--muted)'>None reported.</div>";
+  }catch(e){ el.innerHTML="<div style='color:var(--red)'>Failed: "+escapeHtml(e.message)+"</div>"; }
+}
+
+/* ---------- diagnostics ---------- */
+async function runDiag(){
+  const out=document.getElementById("diag"); out.textContent="Testing…";
+  let lines=[];
+  try{ const r=await api("/health"); lines.push("GET /health → "+r.status+(r.ok?" (ok)":"")); }catch(e){ lines.push("GET /health → "+e.message); }
+  try{ const r=await api("/v1/capabilities"); const d=await r.json();
+    lines.push("GET /v1/capabilities → "+r.status);
+    if(d.features){ const on=Object.entries(d.features).filter(([k,v])=>v).map(([k])=>k).join(", ");
+      lines.push("features: "+(on||"(none advertised)")); }
+  }catch(e){ lines.push("GET /v1/capabilities → "+e.message); }
+  try{ const r=await api("/api/sessions?limit=1"); lines.push("GET /api/sessions → "+r.status); }catch(e){ lines.push("GET /api/sessions → "+e.message); }
+  out.textContent = lines.join("\n");
+}
+
+/* ---------- helpers ---------- */
+function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function str(x){ if(x==null) return ""; if(typeof x==="string") return x; if(Array.isArray(x)) return x.map(str).join("\n");
+  if(typeof x==="object"){ if(x.text) return str(x.text); if(x.content) return str(x.content); return JSON.stringify(x,null,2);} return String(x); }
+function relTime(ts){ if(!ts) return ""; const d=Date.now()/1000 - (typeof ts==="string"?Date.parse(ts)/1000:ts);
+  if(d<60) return "just now"; if(d<3600) return Math.floor(d/60)+"m ago"; if(d<86400) return Math.floor(d/3600)+"h ago"; return Math.floor(d/86400)+"d ago"; }
+function setBusy(b){ document.getElementById("ring").style.borderTopColor = b?"var(--green)":"var(--accent)"; }
+
+/* ---------- markdown + Hermes-aware rendering ---------- */
+// Hermes wraps meta/context content in bracketed headers, e.g.
+//   [CONTEXT COMPACTION — REFERENCE ONLY] ...   [PRIOR CONTEXT — ...]   [SYSTEM ...]
+// Render those as de-emphasized "system note" callouts; render the rest as markdown.
+const SYSNOTE_RE = /^\[([A-Z][A-Z0-9 _\-–—]+)(?:[ —–]+(.*?))?\]/;
+function splitSysNotes(text){
+  const lines = text.split("\n");
+  const out = []; let i = 0;
+  while(i < lines.length){
+    const m = lines[i].match(SYSNOTE_RE);
+    if(m && lines[i].startsWith("[")){
+      const label = m[1]; const sub = m[2]||"";
+      // remainder of this same line after the closing ] belongs to the note body
+      const after = lines[i].slice(m[0].length).replace(/^\s*/, "");
+      const bodyLines = []; if(after) bodyLines.push(after); let j = i+1;
+      while(j < lines.length){
+        const ln = lines[j];
+        if(ln.trim()===""){
+          let k=j+1; while(k<lines.length && lines[k].trim()==="") k++;
+          if(k<lines.length && lines[k].match(SYSNOTE_RE) && lines[k].startsWith("[")) break;
+          bodyLines.push(ln); j++; continue;
+        }
+        if(ln.match(SYSNOTE_RE) && ln.startsWith("[")) break;
+        bodyLines.push(ln); j++;
+      }
+      out.push({type:"note", label, sub, body: bodyLines.join("\n").trim()});
+      i = j;
+    } else {
+      const md = [];
+      while(i < lines.length){
+        const ln = lines[i];
+        if(ln.match(SYSNOTE_RE) && ln.startsWith("[")) break;
+        md.push(ln); i++;
+      }
+      if(md.join("\n").trim()) out.push({type:"md", text: md.join("\n")});
+    }
+  }
+  return out;
+}
+function renderMarkdown(text){
+  if(text==null) return "";
+  const blocks = splitSysNotes(String(text));
+  let html = "";
+  for(const b of blocks){
+    if(b.type==="note"){
+      const body = b.body ? marked.parse(b.body, {breaks:true, gfm:true}) : "";
+      const head = escapeHtml((b.label||"note") + (b.sub? " — "+b.sub : ""));
+      html += "<div class='sysnote'><div class='sysnote-h'>"+head+"</div>"+(body?"<div class='sysnote-b'>"+body+"</div>":"")+"</div>";
+    }else{
+      html += marked.parse(b.text, {breaks:true, gfm:true});
+    }
+  }
+  return html;
+}
+function setBody(el, text){ el.innerHTML = renderMarkdown(text); }
+
+/* ---------- helpers ---------- */
+document.getElementById("sendBtn").onclick = send;
+document.getElementById("input").addEventListener("keydown", e=>{ if(e.key==="Enter"&&!e.shiftKey){ e.preventDefault(); send(); }});
+document.getElementById("newBtn").onclick = newSession;
+document.getElementById("refreshBtn").onclick = refresh;
+document.getElementById("searchInput").addEventListener("input", ()=> loadSessions());
+document.getElementById("rightBtn").onclick = ()=> { const r=document.getElementById("right"); r.classList.toggle("open"); toggleScrim(r.classList.contains("open")); if(r.classList.contains("open")){ loadSkills(); loadTools(); } };
+document.getElementById("menuBtn").onclick = ()=> { const s=document.getElementById("sidebar"); s.classList.toggle("open"); toggleScrim(s.classList.contains("open")); };
+document.getElementById("scrim").onclick = ()=> { document.getElementById("sidebar").classList.remove("open"); document.getElementById("right").classList.remove("open"); toggleScrim(false); };
+function toggleScrim(on){ document.getElementById("scrim").classList.toggle("hidden", !on); }
+document.getElementById("tabSkills").onclick = ()=> { document.getElementById("tabSkills").classList.add("on"); document.getElementById("tabTools").classList.remove("on"); document.getElementById("skillsList").classList.remove("hidden"); document.getElementById("toolsList").classList.add("hidden"); };
+document.getElementById("tabTools").onclick = ()=> { document.getElementById("tabTools").classList.add("on"); document.getElementById("tabSkills").classList.remove("on"); document.getElementById("toolsList").classList.remove("hidden"); document.getElementById("skillsList").classList.add("hidden"); };
+document.getElementById("infoBtn").onclick = ()=> { document.getElementById("settingsModal").classList.remove("hidden"); document.getElementById("cfgUrl").value=cfg.url||""; document.getElementById("cfgKey").value=""; runDiag(); };
+document.getElementById("settingsBtn").onclick = ()=> { document.getElementById("settingsModal").classList.remove("hidden"); document.getElementById("cfgUrl").value=cfg.url||""; document.getElementById("cfgKey").value=cfg.key||""; runDiag(); };
+document.getElementById("cfgCancel").onclick = ()=> document.getElementById("settingsModal").classList.add("hidden");
+document.getElementById("cfgSave").onclick = ()=> { cfg.url=document.getElementById("cfgUrl").value.trim(); cfg.key=document.getElementById("cfgKey").value.trim(); saveCfg(); document.getElementById("settingsModal").classList.add("hidden"); loadSessions(); };
+document.getElementById("diagBtn").onclick = runDiag;
+
+/* ---------- service worker (PWA) ---------- */
+if("serviceWorker" in navigator){
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch(()=>{});
+  });
+}
+
+/* ---------- boot with auth gate ---------- */
+(async function(){
+  const ok = await ensureAuth();
+  if(ok) boot();
+})();
+</script>
+</body>
+</html>
