@@ -1,8 +1,46 @@
-# Hermes Uplink
+<div align="center">
+
+# 📡 Hermes Uplink
 
 A near-universal, data-efficient, text-based "thin client" for [Hermes Agent](https://hermes-agent.nousresearch.com/). Hermes Uplink lets you keep your powerful desktop as the central hub—where all your project files, curated skills, assets, and ML libraries reside—while seamlessly directing complex workflows from any mobile or laptop browser on the go.
 
-Instead of relying on bandwidth-heavy, laggy screen sharing or transferring gigabytes of data to your phone, Uplink uses a loopback-only proxy behind an HTTPS tunnel. This keeps **all your existing sessions visible and seamlessly resumable**, provides full tool/skill access, and requires virtually zero bandwidth.
+Instead of relying on bandwidth-heavy, laggy screen sharing or transferring gigabytes of data to your phone/laptop, Uplink uses a loopback-only proxy behind an HTTPS tunnel. This keeps **all your existing sessions visible and resumable**, provides full tool and skill access, and uses minimal bandwidth.
+
+[![GitHub release](https://img.shields.io/github/release/mr-september/hermes-uplink.svg)](https://github.com/mr-september/hermes-uplink/releases)
+[![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-yellow.svg)](index.html)
+
+---
+
+## 💖 Support FOSS Projects
+
+**My work developing, contributing to, and maintaining open-source software is made possible solely by your donations. Your support is vital to the ongoing development of FOSS solutions.**
+
+<p align="center">
+<a href="https://www.paypal.com/donate/?hosted_button_id=WFXL2T42BBCRN">
+  <img src="https://raw.githubusercontent.com/mr-september/central_automation_hub/refs/heads/main/bluePayPalbutton.svg" alt="PayPal" height="36">
+</a>
+<a href="https://ko-fi.com/Q5Q11I49GI">
+  <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Ko-fi" height="36">
+</a>
+<a href="https://liberapay.com/mr-september/donate">
+  <img src="https://liberapay.com/assets/widgets/donate.svg" alt="Liberapay" height="36">
+</a>
+<a href="https://nowpayments.io/donation?api_key=5b5fabd5-2c33-4525-99a3-bf27f587780c" target="_blank" rel="noreferrer noopener">
+  <img src="https://nowpayments.io/images/embeds/donation-button-black.svg" alt="Crypto donation button by NOWPayments" height="36">
+</a>
+</p>
+
+### 🌟 Other Ways to Help
+
+⭐ **Star the repository** to show your support  
+🐦 **Share** to help others discover Hermes Uplink  
+📝 **Write reviews** and share your experience  
+🎥 **Create content** - tutorials, guides, or showcase videos
+
+</div>
+
+---
 
 ## Design Principles
 - **Zero build steps:** The client is a single vanilla HTML/JS file.
@@ -35,7 +73,7 @@ flowchart LR
 
 ## Features
 
-- **Full Session Sync:** Lists all sessions from the shared session store (CLI, Electron/desktop, Telegram, etc.). You can resume any session, start new chats, and use full-text search.
+- **Full Session Sync:** Lists all sessions from the shared session store (CLI, Electron/desktop, Telegram, etc.). You can resume any session, start new chats, and filter the list by title or source.
 - **Battery-Friendly Auto-Refresh:** The client refreshes when the tab gains focus or becomes visible, eliminating background polling. It also has a manual refresh button.
 - **Real-time Streaming:** Supports streaming turns via SSE (Server-Sent Events), rendering tool calls and progress in real-time.
 - **Tool Discovery:** Automatically discovers skills and toolsets via `/v1/skills` and `/v1/toolsets`.
