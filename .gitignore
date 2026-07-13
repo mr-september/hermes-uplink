@@ -9,3 +9,6 @@ __pycache__/
 
 # Local experiments
 scratch/
+
+# Design source files (do not commit; keep the rendered PNGs under assets/)
+assets/*.psd
