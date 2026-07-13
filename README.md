@@ -137,6 +137,8 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 ## Security Model
 
 - **No API Keys in Browser:** The proxy injects the Hermes API key server-side.
+- **Pinned static assets:** The proxy validates the reviewed HTML, vendor script, and service-worker digests before serving; CSP allows only the pinned script/style sources.
+- **Direct-mode transport:** Browser direct mode accepts HTTPS endpoints or loopback HTTP only, and rejects URLs containing embedded credentials.
 - **Session Authentication:** The passphrase is accepted only by a POST authentication endpoint. The proxy issues a short-lived HttpOnly browser session cookie.
 - **Public Endpoint, Application Gate:** Tailscale Funnel makes the HTTPS endpoint publicly reachable; the Uplink passphrase remains the application-level authentication gate.
 - **Loopback Boundary:** The proxy listens only on localhost. The Funnel target is `http://127.0.0.1:8787`.

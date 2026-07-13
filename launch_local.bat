@@ -50,11 +50,15 @@ if errorlevel 1 (
 
 REM ---- first-run setup (idempotent) ----
 echo [*] Ensuring Hermes API Server is enabled...
-hermes config set API_SERVER_ENABLED true
+for /f "delims=" %%I in ('hermes config path') do set "CONFIG_PATH=%%I"
+findstr /R /C:"^API_SERVER_ENABLED:[ ]*true" "%CONFIG_PATH%" >nul 2>&1
 if errorlevel 1 (
-  echo [!] Hermes API configuration failed.
-  pause
-  exit /b 1
+  hermes config set API_SERVER_ENABLED true
+  if errorlevel 1 (
+    echo [!] Hermes API configuration failed.
+    pause
+    exit /b 1
+  )
 )
 if not exist ".uplink-key.txt" (
   echo [*] Generating API key...
@@ -79,11 +83,17 @@ if /i not "%API_KEY_VALID%"=="OK" (
   pause
   exit /b 1
 )
-hermes config set API_SERVER_KEY "%HERMES_API_KEY%"
+findstr /C:"API_SERVER_KEY: %HERMES_API_KEY%" "%CONFIG_PATH%" >nul 2>&1
 if errorlevel 1 (
-  echo [!] Hermes API key configuration failed.
-  pause
-  exit /b 1
+  findstr /C:"API_SERVER_KEY: '%HERMES_API_KEY%'" "%CONFIG_PATH%" >nul 2>&1
+  if errorlevel 1 (
+    hermes config set API_SERVER_KEY "%HERMES_API_KEY%"
+    if errorlevel 1 (
+      echo [!] Hermes API key configuration failed.
+      pause
+      exit /b 1
+    )
+  )
 )
 echo [*] Checking passphrase strength...
 python -c "import os,secrets,string; p='.uplink-pass.txt'; v=open(p,encoding='ascii').read().strip() if os.path.exists(p) else ''; v=v if len(v)>=20 and v.isalnum() else ''.join(secrets.choice(string.ascii_letters+string.digits) for _ in range(24)); open(p,'w',encoding='ascii',newline='').write(v)"

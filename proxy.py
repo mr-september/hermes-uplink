@@ -6,6 +6,8 @@ at a tunnel or reverse proxy and forward to this process on localhost.
 """
 
 import argparse
+import base64
+import hashlib
 import ipaddress
 import json
 import logging
@@ -43,15 +45,59 @@ PID_FILE = os.path.join(HERE, ".uplink.pid")
 API_KEY = os.environ.get("HERMES_API_KEY", "")
 PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 
-# The hash covers the inline application script in index.html. Keep it in sync
-# when that script changes; the static client otherwise has no CSP exception.
+# These digests are deliberately pinned. The proxy must not automatically
+# authorize whatever JavaScript/HTML happens to be present on disk at startup.
+# Update the values as part of the same reviewed change as the corresponding
+# static asset; startup then fails closed if the deployed files drift.
+PINNED_ASSET_HASHES = {
+    "index.html": "KGyHECdpoDmjh//r5BxHylPxNR8c6zBKhy7/7fpdgJs=",
+    "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
+    "sw.js": "jmV8YRwTjPngenydh7ZTDROaN10SGH/1RwHtWK5fxj4=",
+}
+
+INLINE_SCRIPT_HASH = "xr+6UoCr3apy8ypMk5nHTjMAf8L8ClzF3aPXCjBoLQ8="
+INLINE_STYLE_HASH = "oXCE0fri+WfZ2fof/7DYxlxbzZgKRH60A1DowxZuOwE="
+
+
+def _sha256_base64(relative_path):
+    digest = hashlib.sha256()
+    path = os.path.join(HERE, relative_path)
+    try:
+        with open(path, "rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError as error:
+        raise RuntimeError(f"required static asset is unavailable: {relative_path}") from error
+    return base64.b64encode(digest.digest()).decode("ascii")
+
+
+def _validate_pinned_asset(relative_path, expected_hash):
+    actual_hash = _sha256_base64(relative_path)
+    if actual_hash != expected_hash:
+        raise RuntimeError(
+            f"integrity check failed for {relative_path}: "
+            f"expected sha256-{expected_hash}, got sha256-{actual_hash}"
+        )
+
+
+def _validate_pinned_assets():
+    for relative_path, expected_hash in PINNED_ASSET_HASHES.items():
+        _validate_pinned_asset(relative_path, expected_hash)
+
+
+_validate_pinned_assets()
+
 CONTENT_SECURITY_POLICY = (
-    "default-src 'self'; "
-    "script-src 'self' 'sha256-mUkj8OlRKUOIM/BURzuqD1fg/XqI/jsmiA0BxQVDe7A='; "
-    "style-src 'self' 'unsafe-inline'; "
+    "default-src 'none'; "
+    "script-src 'strict-dynamic' "
+    f"'sha256-{PINNED_ASSET_HASHES['vendor/marked.umd.js']}' "
+    f"'sha256-{INLINE_SCRIPT_HASH}'; "
+    f"style-src 'sha256-{INLINE_STYLE_HASH}'; "
+    "script-src-attr 'none'; style-src-attr 'none'; "
     "img-src 'self'; "
     "connect-src 'self' https: http://127.0.0.1:* http://localhost:*; "
-    "worker-src 'self'; object-src 'none'; base-uri 'none'; "
+    "font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; "
+    "base-uri 'none'; "
     "form-action 'self'; frame-ancestors 'none'"
 )
 SECURITY_HEADERS = {
@@ -342,7 +388,9 @@ class Handler(BaseHTTPRequestHandler):
         if path_only == "/__logout":
             self._handle_logout()
             return
-        if path_only in ("/", "/index.html", "/manifest.webmanifest", "/sw.js") or path_only.startswith("/vendor/"):
+        if (path_only in ("/", "/index.html", "/manifest.webmanifest", "/sw.js")
+                or path_only.startswith("/vendor/")
+                or path_only.startswith("/assets/")):
             self._serve_static(path_only)
             return
         if path_only.startswith("/api/") or path_only.startswith("/v1/") or path_only.startswith("/health"):
@@ -360,6 +408,7 @@ class Handler(BaseHTTPRequestHandler):
         root = os.path.realpath(HERE)
         fp = os.path.realpath(os.path.join(root, relative))
         vendor_root = os.path.realpath(os.path.join(root, "vendor"))
+        assets_root = os.path.realpath(os.path.join(root, "assets"))
         exact = {
             os.path.realpath(os.path.join(root, "index.html")),
             os.path.realpath(os.path.join(root, "manifest.webmanifest")),
@@ -369,7 +418,11 @@ class Handler(BaseHTTPRequestHandler):
             in_vendor = os.path.commonpath((fp, vendor_root)) == vendor_root
         except ValueError:
             in_vendor = False
-        if fp not in exact and not in_vendor:
+        try:
+            in_assets = os.path.commonpath((fp, assets_root)) == assets_root
+        except ValueError:
+            in_assets = False
+        if fp not in exact and not in_vendor and not in_assets:
             self._send(404, "text/plain; charset=utf-8", b"not found")
             return
         if not os.path.isfile(fp):
@@ -382,6 +435,9 @@ class Handler(BaseHTTPRequestHandler):
             ".webmanifest": "application/manifest+json",
             ".css": "text/css; charset=utf-8",
             ".json": "application/json; charset=utf-8",
+            ".png": "image/png",
+            ".svg": "image/svg+xml",
+            ".ico": "image/x-icon",
         }.get(ext, "application/octet-stream")
         try:
             with open(fp, "rb") as stream:

@@ -571,8 +571,9 @@ def start_access(port: int, root: Path = ROOT) -> int:
     print("Share the URL and passphrase separately.")
     print(f"Passphrase: {passphrase}")
     print("Status: ACTIVE — Uplink Funnel route verified.")
-    print("The browser/device does not need Tailscale installed.")
+    print("The client device does not need Tailscale installed.")
     print("The desktop, Tailscale, local proxy, and Hermes gateway must remain available.")
+    print("You may now safely close this terminal window; the route runs in the background.")
     print("=" * 60)
     return 0
 

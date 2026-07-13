@@ -41,6 +41,9 @@
   .bar{display:flex; align-items:center; gap:8px; padding:10px; border-bottom:1px solid var(--border)}
   .bar h1{font-size:15px; margin:0; flex:1; letter-spacing:.3px}
   .toolbtn{background:transparent; border:1px solid var(--border); width:40px; height:40px; padding:0; flex:none}
+  .new-chat-bar{border:none; padding:0 10px 6px}
+  .new-chat-button{flex:1}
+  .active-title{flex:1; font-size:13px; color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 
   #search{padding:8px 10px}
   #sessionList{flex:1; overflow:auto; padding:0 8px 8px}
@@ -134,8 +137,12 @@
   /* modal */
   .modal{position:fixed; inset:0; background:#000a; display:flex; align-items:center; justify-content:center; z-index:50}
   .modal .box{background:var(--bg2); border:1px solid var(--border); border-radius:12px; padding:18px; width:min(420px,92vw)}
+  .modal-title{margin:0 0 4px}
+  .modal-subtitle{font-size:12px; color:var(--muted)}
+  .modal-actions{display:flex; gap:8px; margin-top:14px; justify-content:flex-end}
   .modal label{display:block; font-size:12px; color:var(--muted); margin:12px 0 4px}
   .diag{margin-top:12px; font-size:11px; color:var(--muted); white-space:pre-wrap}
+  #thread .empty-state{margin:auto; color:var(--muted); text-align:center}
 
   /* On desktop the sidebar is always visible, so the hamburger (mobile-only drawer
      toggle) is a no-op there — hide it to avoid a dead control. */
@@ -169,8 +176,8 @@
       <button class="toolbtn" id="settingsBtn" title="Settings">&#9881;</button>
     </div>
     <div id="search"><input id="searchInput" placeholder="Search sessions…" /></div>
-    <div class="bar" style="border:none;padding:0 10px 6px">
-      <button class="primary" id="newBtn" style="flex:1">+ New chat</button>
+    <div class="bar new-chat-bar">
+      <button class="primary new-chat-button" id="newBtn">+ New chat</button>
     </div>
     <div id="sessionList"></div>
   </div>
@@ -179,12 +186,12 @@
     <div class="bar">
       <button class="toolbtn" id="menuBtn" title="Sessions">&#9776;</button>
       <button class="toolbtn" id="infoBtn" title="Capabilities">&#9432;</button>
-      <div style="flex:1;font-size:13px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" id="activeTitle">No session — start or pick one</div>
+      <div class="active-title" id="activeTitle">No session — start or pick one</div>
       <span id="statusDot" class="dot" title="Connection status"></span>
       <button class="toolbtn" id="refreshBtn" title="Refresh (or just switch to this tab)">&#8635;</button>
       <button class="toolbtn" id="rightBtn" title="Skills / Tools">&#9881;</button>
     </div>
-    <div id="thread"><div style="margin:auto;color:var(--muted);text-align:center">
+    <div id="thread"><div class="empty-state">
       Pick a session on the left, or start a new chat.<br/>All sessions live on your home desktop.</div></div>
     <div id="composer">
       <textarea id="input" placeholder="Message the agent… (Enter to send, Shift+Enter newline)" enterkeyhint="return"></textarea>
@@ -206,14 +213,14 @@
   <!-- settings modal -->
   <div class="modal hidden" id="settingsModal">
     <div class="box">
-      <h3 style="margin:0 0 4px">Connection</h3>
-      <div style="font-size:12px;color:var(--muted)">Leave Server URL empty to use same-origin (proxy mode).</div>
+      <h3 class="modal-title">Connection</h3>
+      <div class="modal-subtitle">Leave Server URL empty to use same-origin (proxy mode).</div>
       <label>Server base URL (e.g. https://hermes.example.com or http://127.0.0.1:8642)</label>
       <input id="cfgUrl" placeholder="(same origin)" />
       <label>API key (Bearer) — only needed in direct mode</label>
       <input id="cfgKey" type="password" placeholder="(injected by proxy in same-origin mode)" />
       <div class="diag" id="diag"></div>
-       <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+       <div class="modal-actions">
          <button id="diagBtn">Test</button>
          <button id="logoutBtn">Log out</button>
          <button id="cfgCancel">Cancel</button>
@@ -227,19 +234,19 @@
   <!-- passphrase gate (one-time per browser session) -->
   <div class="modal hidden" id="authModal">
     <div class="box">
-      <h3 style="margin:0 0 4px">Hermes Uplink</h3>
-      <div style="font-size:12px;color:var(--muted)">Enter the passphrase shown on your desktop launcher.</div>
+      <h3 class="modal-title">Hermes Uplink</h3>
+      <div class="modal-subtitle">Enter the passphrase shown on your desktop launcher.</div>
       <label>Passphrase</label>
       <input id="authInput" type="password" placeholder="••••••••" autocomplete="current-password" />
       <div class="diag" id="authDiag"></div>
-      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+       <div class="modal-actions">
         <button class="primary" id="authSubmit">Connect</button>
       </div>
     </div>
   </div>
 
 <!-- vendored offline markdown renderer (no CDN); from marked v17 (MIT) -->
-<script src="vendor/marked.umd.js"></script>
+<script src="vendor/marked.umd.js" integrity="sha256-AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=" crossorigin="anonymous"></script>
 <script>
 const LS_KEY = "hermes-uplink-cfg";
 let cfg = loadCfg();
@@ -259,11 +266,19 @@ function loadCfg(){
 function saveCfg(){
   try{ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }catch{}
 }
-function base(){ return (cfg.url||"").replace(/\/+$/,"") }
+function connectionBase(){
+  const raw = (cfg.url||"").trim();
+  const url = new URL(raw || window.location.origin, window.location.origin);
+  if(url.username || url.password) throw new Error("Server URL must not contain credentials.");
+  const localHttp = url.protocol === "http:" && ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname);
+  if(url.protocol !== "https:" && url.origin !== window.location.origin && !localHttp){
+    throw new Error("External Server URL must use HTTPS.");
+  }
+  return url.href.replace(/\/+$/,"");
+}
+function base(){ return connectionBase(); }
 function externalMode(){
-  if(!base()) return false;
-  try{ return new URL(base(), window.location.origin).origin !== window.location.origin; }
-  catch{ return true; }
+  return new URL(base(), window.location.origin).origin !== window.location.origin;
 }
 
 async function api(path, opts={}){
@@ -300,6 +315,16 @@ async function ensureAuth(){
   return false;
 }
 async function submitAuth(){
+  let isExternal;
+  try{ isExternal = externalMode(); }
+  catch(error){
+    showAuth(error instanceof Error ? error.message : "Invalid Server URL.");
+    return;
+  }
+  if(isExternal){
+    showAuth("Authentication is available only through the same-origin proxy.");
+    return;
+  }
   const v = document.getElementById("authInput").value.trim();
   if(!v){ document.getElementById("authDiag").textContent = "Enter the passphrase."; return; }
   const button = document.getElementById("authSubmit");
@@ -399,6 +424,8 @@ function boot(){
   probe();
   loadSessions();
   updateRingState();
+  loadSkills();
+  loadTools();
 }
 
 /* ---------- manual / on-focus refresh ----------
@@ -978,7 +1005,10 @@ document.getElementById("rightBtn").onclick = ()=>{
   }else{
     r.classList.toggle("collapsed");
   }
-  if(r.classList.contains("open")){ loadSkills(); loadTools(); }
+  // Load whenever the panel is visible. On desktop the rail is the always-on
+  // 3-column panel toggled via .collapsed (never .open), so the old .open-only
+  // guard left it empty there. Reload on every open for freshness.
+  if(!r.classList.contains("collapsed")){ loadSkills(); loadTools(); }
 };
 document.getElementById("menuBtn").onclick = ()=>{
   const s=document.getElementById("sidebar"); s.classList.toggle("open"); toggleScrim(s.classList.contains("open"));

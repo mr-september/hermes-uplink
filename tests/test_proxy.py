@@ -162,8 +162,8 @@ class ProxyIntegrationTests(unittest.TestCase):
         self.assertIn("text/html", headers["Content-Type"])
         self.assertIn(b"Hermes Uplink", body)
 
-    def test_root_csp_allows_current_inline_client(self):
-        status, headers, _ = self.request("GET", "/")
+    def test_root_csp_pins_scripts_and_disallows_untrusted_inline_styles(self):
+        status, headers, body = self.request("GET", "/")
         self.assertEqual(status, 200)
         html = (Path(__file__).resolve().parents[1] / "index.html").read_bytes()
         match = re.search(rb"<script>(.*?)</script>", html, re.DOTALL)
@@ -173,6 +173,21 @@ class ProxyIntegrationTests(unittest.TestCase):
         script = match.group(1).replace(b"\r\n", b"\n").replace(b"\r", b"\n")
         digest = base64.b64encode(hashlib.sha256(script).digest()).decode("ascii")
         self.assertIn(f"'sha256-{digest}'", headers["Content-Security-Policy"])
+        self.assertEqual(digest, proxy.INLINE_SCRIPT_HASH)
+        self.assertIn("'strict-dynamic'", headers["Content-Security-Policy"])
+        self.assertNotIn("script-src 'self'", headers["Content-Security-Policy"])
+        self.assertNotIn("'unsafe-inline'", headers["Content-Security-Policy"])
+        self.assertNotIn(b" style=", body.lower())
+        self.assertIn(
+            f"integrity=\"sha256-{proxy.PINNED_ASSET_HASHES['vendor/marked.umd.js']}\"".encode(),
+            body,
+        )
+
+    def test_pinned_assets_match_and_drift_fails_closed(self):
+        for relative_path, expected_hash in proxy.PINNED_ASSET_HASHES.items():
+            self.assertEqual(proxy._sha256_base64(relative_path), expected_hash)
+        with self.assertRaisesRegex(RuntimeError, "integrity check failed for index.html"):
+            proxy._validate_pinned_asset("index.html", "not-a-valid-digest")
 
     def test_validation_requires_loopback_or_explicit_https_remote(self):
         self.assertTrue(proxy.is_loopback_host("127.0.0.1"))
