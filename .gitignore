@@ -2,10 +2,6 @@
 .uplink-key.txt
 .uplink-pass.txt
 .uplink.pid
-.uplink-tunnel-id.txt
-
-# Cloudflared portable download
-bin/
 
 # Python
 __pycache__/

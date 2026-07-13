@@ -1,0 +1,8 @@
+# Normalize line endings on checkout/commit.
+# CRLF is required for Windows batch and VBScript to run reliably.
+*.bat text eol=crlf
+*.vbs text eol=crlf
+
+# Everything else uses LF in the repository; Git applies the
+# platform-appropriate ending on checkout.
+* text=auto eol=lf

@@ -2,9 +2,9 @@
 
 # 📡 Hermes Uplink
 
-A near-universal, data-efficient, text-based "thin client" for [Hermes Agent](https://hermes-agent.nousresearch.com/). Hermes Uplink lets you keep your powerful desktop as the central hub—where all your project files, curated skills, assets, and ML libraries reside—while seamlessly directing complex workflows from any mobile or laptop browser on the go.
+A near-universal, data-efficient, text-based "thin client" for [Hermes Agent](https://hermes-agent.nousresearch.com/). Hermes Uplink lets you keep your powerful desktop as the central hub—where your project files, curated skills, assets, and ML libraries reside—while directing complex workflows from any mobile or laptop browser.
 
-Instead of relying on bandwidth-heavy, laggy screen sharing or transferring gigabytes of data to your phone/laptop, Uplink uses a loopback-only proxy behind an HTTPS tunnel. This keeps **all your existing sessions visible and resumable**, provides full tool and skill access, and uses minimal bandwidth.
+Instead of relying on bandwidth-heavy screen sharing or transferring project data to an edge device, Uplink uses a loopback-only proxy behind an HTTPS tunnel. Existing sessions remain visible and resumable, while the Hermes API key stays on the host desktop.
 
 [![GitHub release](https://img.shields.io/github/release/mr-september/hermes-uplink.svg)](https://github.com/mr-september/hermes-uplink/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -30,20 +30,22 @@ Instead of relying on bandwidth-heavy, laggy screen sharing or transferring giga
 
 ### 🌟 Other Ways to Help
 
-⭐ **Star the repository** to show your support  
-🐦 **Share** to help others discover Hermes Uplink  
-📝 **Write reviews** and share your experience  
-🎥 **Create content** - tutorials, guides, or showcase videos
+⭐ **Star the repository** to help others discover it
+🐦 **Share** your experience
+📝 **Write reviews**
+🎥 **Create content** showing how you use it
 
 </div>
 
 ---
 
 ## Design Principles
+
 - **Zero build steps:** The client is a single vanilla HTML/JS file.
-- **Native execution:** Driven by Hermes's first-party API Server running natively on Windows (no WSL2/docker required).
-- **Secure architecture:** A loopback-only stdlib proxy keeps the API key on the host desktop; remote access is provided through an HTTPS tunnel.
-- **Standalone:** Uplink runs independently of the Hermes-agent and its UI packages, ensuring compatibility across agent upgrades.
+- **Native execution:** Driven by Hermes's first-party API Server running natively on Windows.
+- **Secure architecture:** A loopback-only standard-library proxy keeps the API key on the host desktop; remote access is provided through Tailscale Funnel.
+- **Standalone:** Uplink runs independently of the Hermes-agent UI packages.
+- **Provider discipline:** Internet access has one implementation: Tailscale Funnel. The repository does not bundle tunnel binaries or credentials.
 
 ## Architecture
 
@@ -56,109 +58,139 @@ flowchart LR
         P[proxy.py<br/>loopback HTTP<br/>key injected server-side]
         A[Hermes gateway<br/>API Server :8642]
         R[(Shared session store<br/>%LOCALAPPDATA%\hermes\sessions<br/>desktop / tui / cron / cli)]
+        TS[Tailscale client<br/>Funnel HTTPS]
     end
-    TUN{{"Tunnel<br/>Cloudflare (quick / named)"}}
-    B -- "HTTPS via tunnel<br/>(no API key in browser)" --> P
+    B -- "HTTPS via stable Funnel URL<br/>(no API key in browser)" --> TS
+    TS -- "loopback HTTP" --> P
     P -- "Bearer token<br/>(added here)" --> A
     A -- "reads/writes" --> R
-    B -. "remote reach" .-> TUN -.-> P
     classDef edge fill:#1f6feb22,stroke:#1f6feb;
     classDef desk fill:#21262d,stroke:#f0a500;
     class B edge;
-    class P,A,R desk;
+    class P,A,R,TS desk;
 ```
 
 ## Features
 
-- **Full Session Sync:** Lists all sessions from the shared session store (CLI, Electron/desktop, Telegram, etc.). You can resume any session, start new chats, and filter the list by title or source.
-- **Battery-Friendly Auto-Refresh:** The client refreshes when the tab gains focus or becomes visible, eliminating background polling. It also has a manual refresh button.
-- **Real-time Streaming:** Supports streaming turns via SSE (Server-Sent Events), rendering tool calls and progress in real-time.
-- **Tool Discovery:** Automatically discovers skills and toolsets via `/v1/skills` and `/v1/toolsets`.
-- **Custom UI:** A mobile-responsive, three-pane layout featuring a custom dark theme (Hermes-amber accent).
+- **Full Session Sync:** Lists sessions from the shared Hermes store and resumes existing work.
+- **Battery-Friendly Auto-Refresh:** Refreshes when the tab gains focus or becomes visible.
+- **Real-time Streaming:** Supports streaming turns via Server-Sent Events.
+- **Tool Discovery:** Discovers skills and toolsets through Hermes API endpoints.
+- **Custom UI:** Mobile-responsive three-pane interface with a Hermes-amber theme.
 
 ## Prerequisites
-- **Python 3**: Must be installed and available in your system PATH.
-- **Hermes CLI**: Must be installed and available in your system PATH.
-- **No Python package install is required:** The proxy uses the Python standard library and the Markdown renderer is vendored.
+
+- **Windows 10 or later.**
+- **Python 3** available in PATH.
+- **Hermes CLI** available in PATH.
+- **Tailscale for Windows** installed and signed in on the host desktop. Install it from the [official Windows download](https://tailscale.com/download/windows).
+- **No Python package installation is required.** The proxy and internet-access controller use the Python standard library.
+
+The phone or laptop used as the edge browser does not need Tailscale installed. Tailscale Funnel is available on all plans, but Tailscale's free Personal plan is intended for personal/non-commercial use. Review the [current Tailscale plan terms](https://tailscale.com/pricing) for your situation. Funnel requires no router port forwarding, public IP, or custom domain.
 
 ## Setup & Configuration
 
-### 1. Desktop Configuration (Host)
-Run **`launch.bat`** on your host machine. This script configures the Hermes API Server, generates a synchronized API key, restarts the gateway, and starts the local proxy on `http://127.0.0.1:8787`.
+### 1. Desktop Configuration
 
-The terminal will output a **passphrase**, which is required for remote access from your edge devices. Treat this passphrase like a full-access password: anyone who has it can read existing sessions and use the capabilities exposed by Hermes.
+Run **`launch_local.bat`** on the host desktop. This configures the Hermes API Server, generates a synchronized API key, restarts the gateway, and starts the local proxy on `http://127.0.0.1:8787`.
 
-> **Auto-start:** To run the proxy automatically on login (no admin required), execute `launch.bat install`. Use `launch.bat start|stop|status|uninstall` to manage the service. (Or simply ask Hermes to help you set it up.)
+The terminal outputs a **passphrase** required for remote access. Treat it as a full-access password: anyone who has it can read existing sessions and invoke the capabilities exposed by Hermes.
 
-### 2. Edge Device/Thin Client Access
-For remote access, run **`tunnel.bat`** and open the HTTPS URL it prints. `tunnel.bat named` first verifies that the Hermes Uplink proxy and authentication gate are actually listening on the selected loopback port. Enter the generated passphrase when prompted, then add the page to your Home Screen for a native app-like experience. The browser session normally remains authorized for up to 12 hours; you may need to enter the passphrase again after that or after the desktop proxy restarts.
+> **Auto-start:** Run `launch_local.bat install` to start the proxy automatically at login without requiring administrator privileges. Use `launch_local.bat start|stop|status|uninstall` to manage it.
 
-#### Connection Methods
+### 2. Internet Access
+
+Run **`launch_internet.bat`** on the host desktop. The launcher:
+
+1. verifies that the local proxy is healthy;
+2. guides you through installing/signing in to Tailscale if necessary;
+3. configures Tailscale Funnel for `127.0.0.1:8787`;
+4. verifies that the public route belongs to Uplink; and
+5. displays and copies the stable HTTPS URL.
+
+The first Funnel setup may require a Tailscale web-consent page. The launcher displays the consent URL, attempts to open it in the default browser, and waits for approval; if the browser cannot be opened automatically, open the displayed URL manually. Tailscale's public DNS and certificate provisioning may take several minutes on a first setup.
+
+The launcher stores no Tailscale credentials, tunnel identifiers, or hostnames in the repository. Tailscale's own persisted configuration is the source of truth.
+
+### Connection Methods
 
 | Method | URL to open | Notes |
 |--------|-------------|-------|
-| Local Machine | `http://127.0.0.1:8787` | Always works locally |
-| Over the Internet | Tunnel URL (see below) | Recommended for remote access |
+| Local Machine | `http://127.0.0.1:8787` | Always available while the local proxy is running |
+| Over the Internet | Stable Tailscale Funnel URL | Requires the host desktop, Tailscale, proxy, and Hermes gateway to remain available |
 
-The proxy deliberately refuses non-loopback binds. Direct LAN HTTP would expose the passphrase and agent traffic to anyone able to observe the local network.
+Share the URL and passphrase separately. The URL is public metadata; the passphrase is the credential.
 
-#### Internet Access via Cloudflare Tunnel
-For secure internet access without port-forwarding, use Cloudflare Tunnel (`cloudflared`). The included launcher pins cloudflared `2026.7.1` and verifies its SHA-256 before execution. A scheduled GitHub Actions workflow compares future Windows artifacts with Cloudflare's published release checksum and opens a reviewable update PR; do not auto-merge those PRs.
+### Manage Internet Access
 
-- **Quick Tunnel (No Account):** Run `tunnel.bat`. It provides a temporary URL (e.g., `https://*.trycloudflare.com`) that changes every time it runs. Ideal for quick, temporary access.
-- **Named Tunnel (stable URL):** Run `tunnel.bat named`. On first run it opens a
-  browser for a one-time Cloudflare login, creates the `hermes-uplink` tunnel,
-  records its UUID in the ignored `.uplink-tunnel-id.txt` state file, and prints
-  a **stable** `https://<id>.cfargotunnel.com` URL that survives restarts. No
-  custom domain or DNS zone is required for the printed endpoint. The Uplink
-  passphrase still gates access. If that tunnel name already exists in the
-  account, setup stops rather than reusing an unrelated tunnel. To remove the
-  tunnel later, run `tunnel.bat cleanup` and confirm the UUID shown.
+The interactive launcher provides:
 
-The first named-tunnel setup uses Cloudflare's account certificate in
-`%USERPROFILE%\.cloudflared` to create the tunnel. That certificate can manage
-tunnels in the selected account, so use a dedicated account where practical.
-After creation, normal `named` runs use the tunnel-specific credential file;
-the cleanup command intentionally leaves the account certificate in place for
-other Cloudflare tunnels.
+- **Start or repair:** Reconciles the Funnel route with the current local proxy port.
+- **Status:** Reports Tailscale state and the configured public route.
+- **Disable:** Disables only the Uplink Funnel route after verifying ownership. It does not uninstall Tailscale or disconnect your tailnet.
 
-*Troubleshooting: If a manual Cloudflare cleanup removed the tunnel or its
-credential file, verify the account state before removing `.uplink-tunnel-id.txt`
-and running `tunnel.bat named` again.*
+When launched by double-click, the menu remains open after each operation, reports whether it completed or failed, and returns to the menu. Choose **Exit** to close it. Direct command forms such as `launch_internet.bat status` pause after completion so their result remains visible.
 
-After first setup, verify the printed URL from an external device before
-sharing it. The repository can verify the local proxy and tunnel credentials,
-but only a live Cloudflare account can verify end-to-end public routing.
-
-Share the tunnel URL and passphrase separately. The URL is not a secret, but the passphrase is.
+The launcher never uses a global Funnel reset and refuses to overwrite an unrelated Tailscale Serve or Funnel route on port 443.
 
 ## Security Model
-- **No API Keys in Browser:** The proxy injects the Hermes API key server-side. The key never reaches the browser.
-- **Session Authentication:** The passphrase is accepted only by a POST auth endpoint. The proxy issues a short-lived, HttpOnly browser session cookie; the passphrase is never placed in a URL or sent on API requests.
-- **Full Agent Privilege:** A successful session can read existing sessions and invoke the capabilities exposed by Hermes. Treat the passphrase as a full-access credential.
-- **Loopback Boundary:** The proxy listens only on localhost. Remote HTTPS termination belongs to the tunnel or a separately managed reverse proxy.
+
+- **No API Keys in Browser:** The proxy injects the Hermes API key server-side.
+- **Session Authentication:** The passphrase is accepted only by a POST authentication endpoint. The proxy issues a short-lived HttpOnly browser session cookie.
+- **Public Endpoint, Application Gate:** Tailscale Funnel makes the HTTPS endpoint publicly reachable; the Uplink passphrase remains the application-level authentication gate.
+- **Loopback Boundary:** The proxy listens only on localhost. The Funnel target is `http://127.0.0.1:8787`.
+- **No Tunnel Secrets in Repository:** Tailscale manages its own machine credentials outside the checkout.
+- **Full Agent Privilege:** A connected session can read existing sessions and invoke full Hermes capabilities. Treat the passphrase as a full-access credential.
 
 ## Limitations
-- **Host must stay online:** Remote access requires the desktop proxy and tunnel to remain live. If the host sleeps, reboots, or the proxy stops, the edge client loses all connectivity (the app shell is network-only, so it will not load from cache either).
-- **API Dependency:** Uplink relies on the Hermes API Server REST/SSE endpoints. Major upstream API changes may require client updates.
+
+- **Host platform:** The bundled launchers and automated setup support Windows 10+ hosts. macOS and Linux devices can use Uplink as remote browser clients, but this repository does not provide or test an equivalent macOS/Linux host workflow.
+- **Host must stay online:** Remote access stops if the desktop sleeps, reboots before Tailscale reconnects, or the local proxy/gateway stops. After a reboot or login, the Funnel route resumes automatically once Tailscale reconnects, because it is configured with the `--bg` background flag; you do not need to re-run `launch_internet.bat`.
+- **Offline shell:** The browser application is network-served and has no service-worker/offline shell. It will not load when the proxy is unavailable, even if it was previously opened.
+- **Tailscale Funnel status:** Funnel is currently beta and subject to non-configurable bandwidth limits.
+- **Stable URL scope:** The URL remains stable while the same Tailscale node and tailnet identity are retained. Renaming or re-enrolling the node can change it.
+- **Public exposure:** Anyone who discovers the URL can reach the application authentication gate. Protect the passphrase and consider the endpoint public.
+- **API and version dependency:** Uplink relies on Hermes API Server REST/SSE endpoints, while the installed Hermes version is managed separately. Major upstream API changes may require client updates.
+- **UI/theme scope:** Uplink is a standalone, from-scratch interface with one dark Hermes-amber theme. It does not inherit or synchronize with the native Hermes Desktop theme engine or skins.
 - **File Uploads:** File uploads and image support are currently unsupported, consistent with the API Server's capabilities.
-- **Single shared credential:** The passphrase grants full access to all sessions and capabilities; there are no per-user accounts or roles.
-- **Rotating tunnel URLs:** Quick tunnels generate a new URL on each launch. A stable URL requires a free Cloudflare account and a named tunnel (set up via `tunnel.bat named`).
-- **Cloudflare account scope:** Creating or deleting a named tunnel requires the account certificate created by `cloudflared login`; protect the Windows profile that stores it and revoke it through Cloudflare if compromised.
-- **Version compatibility:** The Hermes CLI/API version is not bundled. Validate the installed Hermes version against the API surface used by this client.
-- **Edge search is limited:** The session list filters by title and source only; there is no full-text search across message content.
+- **Single shared credential:** The passphrase grants full access; there are no per-user accounts or roles.
+- **Edge search:** Session filtering covers title and source, not full-text message content.
+
+## Development and Verification
+
+Run the local unit tests with:
+
+```powershell
+python -m unittest discover -s tests -v
+```
+
+The proxy tests cover authentication, cookie sessions, API-key injection, SSE responses, malformed requests, and loopback validation. Internet-access tests use a fake Tailscale command runner and do not require a Tailscale account.
+
+Before release, perform a live acceptance test from an external network:
+
+- open the Funnel URL without authentication and confirm rejection;
+- authenticate and load sessions;
+- complete an SSE-streamed turn;
+- restart Tailscale and reboot the desktop;
+- confirm the URL is unchanged and the route resumes;
+- disable the route and confirm local access remains functional; and
+- verify that an unrelated existing Tailscale route is never overwritten.
 
 ## Alternative Clients
-Many existing remote solutions are hard-pegged to specific (often outdated) Hermes versions, require cumbersome setups (like WSL or Docker), or run completely segregated agent instances. When choosing a client, consider these alternatives:
 
-- **Open WebUI:** A robust interface, but it maintains an isolated session store. It cannot access or resume your existing Hermes desktop/Electron sessions.
-- **hermes-webui:** A third-party reimplementation that is heavily version-pinned and has historically faced compatibility issues on Windows.
-- **Official Desktop Remote Backend:** Hermes's native Electron app can attach to a remote dashboard (`Settings → Gateway → Remote gateway`). This provides the exact native UI and theme engine. However, the live `/chat` pane currently requires a POSIX PTY (WSL2) on the Windows host machine to function fully.
+Many remote solutions are hard-pegged to specific Hermes versions, require WSL or Docker, or run isolated agent instances. When evaluating alternatives, verify whether they can access and resume the same shared Hermes session store.
+
+- **Open WebUI:** Robust interface, but maintains an isolated session store.
+- **hermes-webui:** Third-party reimplementation with version compatibility risks.
+- **Official Desktop Remote Backend:** Native UI and theme engine, but full Windows functionality may require a POSIX PTY.
 
 ---
+
 **Verification Checklist:**
+
 - [ ] `curl http://127.0.0.1:8642/health` → `{"status":"ok"}`
-- [ ] `curl http://127.0.0.1:8787/api/sessions` (no cookie) → **401** (authentication is enforced)
-- [ ] `curl -i -c cookies.txt -H "Content-Type: application/json" -d "{\"passphrase\":\"<passphrase>\"}" http://127.0.0.1:8787/__auth` → **204** + `Set-Cookie`
-- [ ] `curl -b cookies.txt http://127.0.0.1:8787/api/sessions` → **200** + lists your desktop/Electron sessions
-- [ ] `curl "http://127.0.0.1:8787/api/sessions?t=<passphrase>"` → **401** (credentials are not accepted in URLs)
+- [ ] `curl http://127.0.0.1:8787/api/sessions` (no cookie) → **401**
+- [ ] Authenticate through `POST /__auth` and receive **204** plus `Set-Cookie`
+- [ ] Authenticated `/api/sessions` → **200**
+- [ ] `tailscale funnel status --json` shows the Uplink route to `127.0.0.1:8787`
+- [ ] External browser can authenticate and receive a streamed response

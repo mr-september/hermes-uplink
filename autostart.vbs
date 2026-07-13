@@ -1,5 +1,5 @@
 ' hermes-uplink autostart — runs the proxy headless (no console window) on login.
-' Placed in the Windows Startup folder by "launch.bat install".
+' Placed in the Windows Startup folder by "launch_local.bat install".
 ' Safety: binds loopback only; remote access must use an HTTPS tunnel.
 
 Option Explicit
@@ -82,7 +82,7 @@ End Function
 key  = ReadFile(".uplink-key.txt")
 pass = ReadFile(".uplink-pass.txt")
 If Not Matches("^[A-Za-z0-9_-]{32}$", key) Or Not Matches("^[A-Za-z0-9]{20,}$", pass) Then
-  MsgBox "Hermes Uplink credentials are missing or invalid. Run launch.bat once in the repository folder.", 48, "Hermes Uplink Error"
+  MsgBox "Hermes Uplink credentials are missing or invalid. Run launch_local.bat once in the repository folder.", 48, "Hermes Uplink Error"
   WScript.Quit 1
 End If
 port = WShell.ExpandEnvironmentStrings("%HERMES_PORT%")

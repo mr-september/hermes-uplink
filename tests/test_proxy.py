@@ -1,5 +1,8 @@
+import base64
+import hashlib
 import http.client
 import json
+import re
 import sys
 import threading
 import unittest
@@ -152,6 +155,24 @@ class ProxyIntegrationTests(unittest.TestCase):
     def test_static_path_cannot_escape_vendor_directory(self):
         status, _, _ = self.request("GET", "/vendor/%2e%2e/proxy.py")
         self.assertEqual(status, 404)
+
+    def test_root_serves_client(self):
+        status, headers, body = self.request("GET", "/")
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", headers["Content-Type"])
+        self.assertIn(b"Hermes Uplink", body)
+
+    def test_root_csp_allows_current_inline_client(self):
+        status, headers, _ = self.request("GET", "/")
+        self.assertEqual(status, 200)
+        html = (Path(__file__).resolve().parents[1] / "index.html").read_bytes()
+        match = re.search(rb"<script>(.*?)</script>", html, re.DOTALL)
+        self.assertIsNotNone(match)
+        # HTML parsing canonicalizes CRLF/CR to LF before CSP hashes are
+        # checked. Hash the browser-visible script text, not raw file bytes.
+        script = match.group(1).replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        digest = base64.b64encode(hashlib.sha256(script).digest()).decode("ascii")
+        self.assertIn(f"'sha256-{digest}'", headers["Content-Security-Policy"])
 
     def test_validation_requires_loopback_or_explicit_https_remote(self):
         self.assertTrue(proxy.is_loopback_host("127.0.0.1"))

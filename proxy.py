@@ -20,6 +20,8 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import BoundedSemaphore, Lock, Semaphore, Thread
 
+from console_utils import enable_console_selection
+
 
 UPSTREAM = "http://127.0.0.1:8642"
 PROXY_PORT = 8787
@@ -34,6 +36,8 @@ MAX_ACTIVE_PROXY_REQUESTS = 32
 MAX_ACTIVE_CONNECTIONS = 128
 REQUEST_HEADER_TIMEOUT = 30
 SESSION_COOKIE = "hermes_uplink_session"
+HEALTH_PROBE_HEADER = "X-Hermes-Uplink-Health"
+HEALTH_PROBE_VALUE = "1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 PID_FILE = os.path.join(HERE, ".uplink.pid")
 API_KEY = os.environ.get("HERMES_API_KEY", "")
@@ -43,7 +47,7 @@ PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 # when that script changes; the static client otherwise has no CSP exception.
 CONTENT_SECURITY_POLICY = (
     "default-src 'self'; "
-    "script-src 'self' 'sha256-yZsm+kXirZWfrEIl6//bIsoNMALG0mQVjlCP8YBrrCg='; "
+    "script-src 'self' 'sha256-mUkj8OlRKUOIM/BURzuqD1fg/XqI/jsmiA0BxQVDe7A='; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self'; "
     "connect-src 'self' https: http://127.0.0.1:* http://localhost:*; "
@@ -350,6 +354,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, "text/plain; charset=utf-8", b"not found")
 
     def _serve_static(self, path):
+        if path == "/":
+            path = "/index.html"
         relative = urllib.parse.unquote(path.lstrip("/"))
         root = os.path.realpath(HERE)
         fp = os.path.realpath(os.path.join(root, relative))
@@ -471,6 +477,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send(405, "text/plain; charset=utf-8", b"method not allowed", {"Allow": "GET, HEAD, POST, PUT, PATCH, DELETE"})
 
     def log_message(self, fmt, *args):
+        if self.headers.get(HEALTH_PROBE_HEADER) == HEALTH_PROBE_VALUE:
+            return
         LOGGER.info("%s - %s", self.address_string(), fmt % args)
 
 
@@ -522,6 +530,7 @@ def main():
 
     UPSTREAM, PROXY_PORT, API_KEY, PASS = upstream, args.port, api_key, passphrase
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    enable_console_selection()
     httpd = UplinkServer((args.host, args.port), Handler)
     try:
         _write_pid()

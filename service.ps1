@@ -6,7 +6,7 @@ param(
 
 $pidFile = Join-Path $PSScriptRoot ".uplink.pid"
 if (-not (Test-Path -LiteralPath $pidFile)) {
-    if ($Action -eq "status") { Write-Output "[!] Not running (run: launch.bat start)" }
+    if ($Action -eq "status") { Write-Output "[!] Not running (run: launch_local.bat start)" }
     else { Write-Output "[!] Not running." }
     exit 1
 }
@@ -27,7 +27,7 @@ $isHermesProxy = $process -and
     $commandLine -match $scriptPattern -and
     $commandLine -match $portPattern
 if (-not $isHermesProxy) {
-    if ($Action -eq "status") { Write-Output "[!] Not running (run: launch.bat start)" }
+    if ($Action -eq "status") { Write-Output "[!] Not running (run: launch_local.bat start)" }
     else { Write-Output "[!] Refused to stop a process that was not identified as Hermes Uplink." }
     exit 1
 }

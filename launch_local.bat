@@ -3,23 +3,22 @@ REM =====================================================================
 REM  hermes-uplink  -  launcher / service manager
 REM ---------------------------------------------------------------------
 REM  Usage:
-REM    launch.bat              -> run in foreground (console) and print passphrase
-REM    launch.bat install      -> install auto-start on login (background, no window)
-REM    launch.bat uninstall    -> remove auto-start
-REM    launch.bat start        -> start the background service now
-REM    launch.bat stop         -> stop the background service
-REM    launch.bat status       -> is it running?
+REM    launch_local.bat              -> run in foreground (console) and print passphrase
+REM    launch_local.bat install      -> install auto-start on login (background, no window)
+REM    launch_local.bat uninstall    -> remove auto-start
+REM    launch_local.bat start        -> start the background service now
+REM    launch_local.bat stop         -> stop the background service
+REM    launch_local.bat status       -> is it running?
 REM
 REM  Env (optional):
 REM    HERMES_PORT   port to bind        (default 8787)
 REM    HERMES_UPSTREAM  API Server URL     (default http://127.0.0.1:8642)
-REM
-REM  Auto-start uses the Windows Startup folder (no admin/elevation needed; same
 REM  mechanism Hermes's own gateway login item uses). It drops autostart.vbs there,
 REM  which launches proxy.py headless via pythonw.
 REM =====================================================================
 setlocal
 cd /d "%~dp0"
+title Hermes Uplink - Local Proxy
 
 if not defined HERMES_PORT set "HERMES_PORT=8787"
 set "HERMES_BIND=127.0.0.1"
@@ -50,7 +49,7 @@ if errorlevel 1 (
 )
 
 REM ---- first-run setup (idempotent) ----
-echo [*] Ensuring Hermes API Server is enabled (native Windows, no WSL2)...
+echo [*] Ensuring Hermes API Server is enabled...
 hermes config set API_SERVER_ENABLED true
 if errorlevel 1 (
   echo [!] Hermes API configuration failed.
@@ -114,8 +113,8 @@ echo.
 echo ============================================================
 echo  Hermes Uplink ready on this machine.
 echo  URL :  http://127.0.0.1:%HERMES_PORT% (local browser only)
-echo  Pass:  %UPLINK_PASSPHRASE%   (type on first phone connect)
-echo  For phone access:  run tunnel.bat for an HTTPS URL
+echo  Pass:  %UPLINK_PASSPHRASE%   (type on connect)
+echo  For phone access:  run launch_internet.bat for an HTTPS URL
 echo ============================================================
 echo.
 if not defined HERMES_UPSTREAM set "HERMES_UPSTREAM=http://127.0.0.1:8642"
@@ -134,7 +133,7 @@ echo Dim WShell > "%LINK%"
 echo Set WShell = CreateObject("WScript.Shell") >> "%LINK%"
 echo WShell.CurrentDirectory = """%~dp0""" >> "%LINK%"
 echo WShell.Run "wscript.exe autostart.vbs", 0, False >> "%LINK%"
-if exist "%LINK%" (echo [+] Installed. Starts on next logon. Run: launch.bat start) else echo [!] Failed to copy to Startup.
+if exist "%LINK%" (echo [+] Installed. Starts on next logon. Run: launch_local.bat start) else echo [!] Failed to copy to Startup.
 goto :eof
 :svc_not_install
 if /i not "%1"=="uninstall" goto svc_not_uninstall
@@ -142,7 +141,7 @@ if exist "%LINK%" (del /f "%LINK%" && echo [+] Removed auto-start.) else echo [!
 goto :eof
 :svc_not_uninstall
 if /i not "%1"=="start" goto svc_not_start
-if exist "%LINK%" (wscript "%LINK%" && echo [+] Started headless.) else echo [!] Run 'launch.bat install' first.
+if exist "%LINK%" (wscript "%LINK%" && echo [+] Started headless.) else echo [!] Run 'launch_local.bat install' first.
 goto :eof
 :svc_not_start
 if /i not "%1"=="stop" goto svc_not_stop
