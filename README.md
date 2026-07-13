@@ -91,27 +91,29 @@ The phone or laptop used as the edge browser does not need Tailscale installed. 
 
 ## Setup & Configuration
 
-### 1. Desktop Configuration
+### Internet Access (the one command you need)
 
-Run **`launch_local.bat`** on the host desktop. This configures the Hermes API Server, generates a synchronized API key, restarts the gateway, and starts the local proxy on `http://127.0.0.1:8787`.
+Run **`launch_internet.bat`** on the host desktop. It handles everything: if the local proxy is not already running, it automatically starts `launch_local.bat` first (configuring the Hermes API Server, generating the API key and passphrase, restarting the gateway, and starting the proxy on `http://127.0.0.1:8787`), then:
 
-The terminal outputs a **passphrase** required for remote access. Treat it as a full-access password: anyone who has it can read existing sessions and invoke the capabilities exposed by Hermes.
-
-> **Auto-start:** Run `launch_local.bat install` to start the proxy automatically at login without requiring administrator privileges. Use `launch_local.bat start|stop|status|uninstall` to manage it.
-
-### 2. Internet Access
-
-Run **`launch_internet.bat`** on the host desktop. The launcher:
-
-1. verifies that the local proxy is healthy;
+1. starts the local proxy itself if needed;
 2. guides you through installing/signing in to Tailscale if necessary;
 3. configures Tailscale Funnel for `127.0.0.1:8787`;
 4. verifies that the public route belongs to Uplink; and
 5. displays and copies the stable HTTPS URL.
 
+The terminal prints a **passphrase** required for remote access. Treat it as a full-access password: anyone who has it can read existing sessions and invoke the capabilities exposed by Hermes.
+
 The first Funnel setup may require a Tailscale web-consent page. The launcher displays the consent URL, attempts to open it in the default browser, and waits for approval; if the browser cannot be opened automatically, open the displayed URL manually. Tailscale's public DNS and certificate provisioning may take several minutes on a first setup.
 
 The launcher stores no Tailscale credentials, tunnel identifiers, or hostnames in the repository. Tailscale's own persisted configuration is the source of truth.
+
+### Local-only or auto-start (optional)
+
+If you only want the local `http://127.0.0.1:8787` page without internet access, or you want it to start at login, run **`launch_local.bat`** directly:
+
+- **`launch_local.bat`** — start the local proxy in the foreground and print the passphrase.
+- **`launch_local.bat install`** — start the proxy automatically at login (no administrator privileges needed).
+- **`launch_local.bat start|stop|status|uninstall`** — manage the background proxy.
 
 ### Connection Methods
 
