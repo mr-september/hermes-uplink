@@ -50,23 +50,32 @@ PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 # Update the values as part of the same reviewed change as the corresponding
 # static asset; startup then fails closed if the deployed files drift.
 PINNED_ASSET_HASHES = {
-    "index.html": "KGyHECdpoDmjh//r5BxHylPxNR8c6zBKhy7/7fpdgJs=",
+    "index.html": "r1yv1mBPlVFQ0xN1beDRlzbK3yFV0c9f3UT7ZT+x/n8=",
     "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
-    "sw.js": "jmV8YRwTjPngenydh7ZTDROaN10SGH/1RwHtWK5fxj4=",
+    "sw.js": "KN3cJrmqGrA4FoLawEWBBDZfXIR7rX66PcM3M4u/eAo=",
 }
 
 INLINE_SCRIPT_HASH = "xr+6UoCr3apy8ypMk5nHTjMAf8L8ClzF3aPXCjBoLQ8="
 INLINE_STYLE_HASH = "oXCE0fri+WfZ2fof/7DYxlxbzZgKRH60A1DowxZuOwE="
+TEXT_ASSETS = frozenset(("index.html", "sw.js"))
 
 
 def _sha256_base64(relative_path):
     digest = hashlib.sha256()
     path = os.path.join(HERE, relative_path)
     try:
-        with open(path, "rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
-    except OSError as error:
+        if relative_path in TEXT_ASSETS:
+            # Git stores text assets with LF, but a Windows checkout may expose
+            # CRLF. Normalize both CRLF and bare CR to LF before hashing so the
+            # integrity check is portable without weakening content validation.
+            with open(path, "r", encoding="utf-8", newline=None) as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), ""):
+                    digest.update(chunk.encode("utf-8"))
+        else:
+            with open(path, "rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+    except (OSError, UnicodeError) as error:
         raise RuntimeError(f"required static asset is unavailable: {relative_path}") from error
     return base64.b64encode(digest.digest()).decode("ascii")
 

@@ -189,6 +189,14 @@ class ProxyIntegrationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "integrity check failed for index.html"):
             proxy._validate_pinned_asset("index.html", "not-a-valid-digest")
 
+    def test_text_asset_integrity_is_line_ending_independent(self):
+        root = Path(__file__).resolve().parents[1]
+        for relative_path in ("index.html", "sw.js"):
+            raw = (root / relative_path).read_bytes()
+            canonical = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            expected = base64.b64encode(hashlib.sha256(canonical).digest()).decode("ascii")
+            self.assertEqual(proxy._sha256_base64(relative_path), expected)
+
     def test_validation_requires_loopback_or_explicit_https_remote(self):
         self.assertTrue(proxy.is_loopback_host("127.0.0.1"))
         self.assertTrue(proxy.is_loopback_host("::1"))

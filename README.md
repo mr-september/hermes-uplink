@@ -147,17 +147,13 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 
 ## Limitations
 
-- **Host platform:** The bundled launchers and automated setup support Windows 10+ hosts. macOS and Linux devices can use Uplink as remote browser clients, but this repository does not provide or test an equivalent macOS/Linux host workflow.
+- **Host platform:** The bundled launchers and automated setup support Windows hosts. Native macOS and Linux devices compatibility and validation would be nice.
 - **Host must stay online:** Remote access stops if the desktop sleeps, reboots before Tailscale reconnects, or the local proxy/gateway stops. After a reboot or login, the Funnel route resumes automatically once Tailscale reconnects, because it is configured with the `--bg` background flag; you do not need to re-run `launch_internet.bat`.
-- **Requires active connection:** The app requires a live connection to your desktop to function and intentionally does not cache data for offline use. It will not load when the proxy is unavailable.
-- **Tailscale Funnel status:** Funnel is currently beta and subject to non-configurable bandwidth limits.
-- **Stable URL scope:** The URL remains stable while the same Tailscale node and tailnet identity are retained. Renaming or re-enrolling the node can change it.
-- **Public exposure:** Anyone who discovers the URL can reach the application authentication gate. Protect the passphrase and consider the endpoint public.
-- **API and version dependency:** Uplink relies on Hermes API Server REST/SSE endpoints, while the installed Hermes version is managed separately. Major upstream API changes may require client updates.
-- **UI/theme scope:** Uplink is a standalone, from-scratch interface with one dark Hermes-amber theme. It does not inherit or synchronize with the native Hermes Desktop theme engine or skins.
-- **File Uploads:** File uploads and image support are currently unsupported, consistent with the API Server's capabilities.
+- **Public exposure:** Anyone who discovers the URL can reach the application authentication gate. **Protect the passphrase and consider the endpoint public.**
+- **UI/theme scope:** Theming support would be nice. Currently hardcoded sizes and colours.
+- **File Uploads:** File and image uploads are currently unsupported.
 - **Single shared credential:** The passphrase grants full access; there are no per-user accounts or roles.
-- **Edge search:** Session filtering covers title and source, not full-text message content.
+- **Edge search:** Session filtering covers title and source, not full-text message content yet.
 
 ## Development and Verification
 
