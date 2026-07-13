@@ -77,6 +77,7 @@ flowchart LR
 - **Real-time Streaming:** Supports streaming turns via Server-Sent Events.
 - **Tool Discovery:** Discovers skills and toolsets through Hermes API endpoints.
 - **Custom UI:** Mobile-responsive three-pane interface with a Hermes-amber theme.
+- **Installable App (PWA):** Use "Add to Home Screen" on iOS/Android for a fullscreen, native app-like experience.
 
 ## Prerequisites
 
@@ -146,7 +147,7 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 
 - **Host platform:** The bundled launchers and automated setup support Windows 10+ hosts. macOS and Linux devices can use Uplink as remote browser clients, but this repository does not provide or test an equivalent macOS/Linux host workflow.
 - **Host must stay online:** Remote access stops if the desktop sleeps, reboots before Tailscale reconnects, or the local proxy/gateway stops. After a reboot or login, the Funnel route resumes automatically once Tailscale reconnects, because it is configured with the `--bg` background flag; you do not need to re-run `launch_internet.bat`.
-- **Offline shell:** The browser application is network-served and has no service-worker/offline shell. It will not load when the proxy is unavailable, even if it was previously opened.
+- **Requires active connection:** The app requires a live connection to your desktop to function and intentionally does not cache data for offline use. It will not load when the proxy is unavailable.
 - **Tailscale Funnel status:** Funnel is currently beta and subject to non-configurable bandwidth limits.
 - **Stable URL scope:** The URL remains stable while the same Tailscale node and tailnet identity are retained. Renaming or re-enrolling the node can change it.
 - **Public exposure:** Anyone who discovers the URL can reach the application authentication gate. Protect the passphrase and consider the endpoint public.
