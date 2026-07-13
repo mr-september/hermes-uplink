@@ -32,9 +32,9 @@ jobs:
             ('cloud' + 'flared'),
             ('cf' + 'argotunnel'),
             ('try' + 'cloud' + 'flare'),
-            'CLOUDFLARED',
-            'TUNNEL_UUID',
-            'TUNNEL_ID_FILE'
+            ('CLOUD' + 'FLARED'),
+            ('TUNNEL_' + 'UUID'),
+            ('TUNNEL_' + 'ID_FILE')
           )
           $tracked = git ls-files | Where-Object {
             $_ -notmatch '(^|/)\.git/' -and
