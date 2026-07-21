@@ -450,13 +450,9 @@ async function refresh(){
       const detailRes = await api("/api/sessions/"+encodeURIComponent(activeId));
       if(detailRes.ok){
         const detail = await detailRes.json();
-        const used = num(detail.input_tokens) + num(detail.output_tokens) + num(detail.cache_read_tokens) + num(detail.cache_write_tokens) + num(detail.reasoning_tokens);
-        let limit = 0;
-        if(detail.model_config) {
-          const cfg = typeof detail.model_config === "string" ? JSON.parse(detail.model_config) : detail.model_config;
-          limit = num(cfg.effective_context_length || cfg.context_length || cfg.model_context_length || 0);
-        }
-        if(limit > 0) { d.context_used = used; d.context_window = limit; }
+        const used = num(detail.context_used);
+        const limit = num(detail.context_window);
+        if(limit > 0 && used > 0) { d.context_used = used; d.context_window = limit; }
       }
     }catch(e){}
 
@@ -530,13 +526,9 @@ async function openSession(id, title){
       const detailRes = await api("/api/sessions/"+encodeURIComponent(id));
       if(detailRes.ok){
         const detail = await detailRes.json();
-        const used = num(detail.input_tokens) + num(detail.output_tokens) + num(detail.cache_read_tokens) + num(detail.cache_write_tokens) + num(detail.reasoning_tokens);
-        let limit = 0;
-        if(detail.model_config) {
-          const cfg = typeof detail.model_config === "string" ? JSON.parse(detail.model_config) : detail.model_config;
-          limit = num(cfg.effective_context_length || cfg.context_length || cfg.model_context_length || 0);
-        }
-        if(limit > 0) { data.context_used = used; data.context_window = limit; }
+        const used = num(detail.context_used);
+        const limit = num(detail.context_window);
+        if(limit > 0 && used > 0) { data.context_used = used; data.context_window = limit; }
       }
     }catch(e){}
 
