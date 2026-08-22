@@ -50,13 +50,13 @@ PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 # Update the values as part of the same reviewed change as the corresponding
 # static asset; startup then fails closed if the deployed files drift.
 PINNED_ASSET_HASHES = {
-    "index.html": "0aZFqB8E9s1r+sFTYNyXkFw49R8vIqak9iIO75ABp28=",
+    "index.html": "d9Mo2zFLu4tGk1P8RAF9H59oGUCG3nIhukM8Bs2qza4=",
     "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
     "sw.js": "KN3cJrmqGrA4FoLawEWBBDZfXIR7rX66PcM3M4u/eAo=",
 }
 
-INLINE_SCRIPT_HASH = "2uhbD8GatoFUuK2U1i7IuUFrYMLmBowb5g0Ltwi/ZH0="
-INLINE_STYLE_HASH = "oXCE0fri+WfZ2fof/7DYxlxbzZgKRH60A1DowxZuOwE="
+INLINE_SCRIPT_HASH = "g6dVstKcDRxROiJ0STRLcf/t1+FBNtz64ABhIgvKSpk="
+INLINE_STYLE_HASH = "JMI5uUzq1oxmVLdk5IZVaP0Z+c3VJzl6ulcFFbC+oe8="
 TEXT_ASSETS = frozenset(("index.html", "sw.js"))
 
 

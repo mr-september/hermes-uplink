@@ -111,6 +111,7 @@
   .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block}
   .dot.run{background:var(--accent); animation:pulse 1s infinite}
   .dot.done{background:var(--green)}
+  .dot.failed{background:var(--red)}
   @keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
 
   /* composer + context/send ring */
@@ -308,7 +309,7 @@ async function ensureAuth(){
       return true;
     }
   }catch(e){
-    showAuth("Cannot reach the Uplink proxy. Start it, then try again.");
+    showAuth("Cannot reach the Uplink proxy: "+(e.message||e));
     return false;
   }
   showAuth("Enter the passphrase shown on your desktop launcher.");
@@ -480,7 +481,7 @@ async function loadSessions(){
     const data = await r.json();
     const sessions = Array.isArray(data) ? data : (data.sessions||data.data||[]);
     renderSessions(sessions);
-  }catch(e){ showError(el, "Failed to load sessions."); }
+  }catch(e){ showError(el, "Failed to load sessions: "+(e.message||e)); }
 }
 
 function renderSessions(sessions){
@@ -657,6 +658,9 @@ function handleFrame(frame, bubble){
   }else if(event==="tool.completed"){
     const cid = obj&&obj.call_id; const out = obj&&obj.output!=null?obj.output:"";
     updateToolCard(cid, "done", typeof out==="string"?out:JSON.stringify(out,null,2));
+  }else if(event==="tool.failed"){
+    const cid = obj&&obj.call_id; const out = obj&&obj.preview!=null?obj.preview:"";
+    updateToolCard(cid, "failed", typeof out==="string"?out:JSON.stringify(out,null,2));
   }else if(event==="run.completed"){
     /* server will re-sync history via openSession */
   }
@@ -885,7 +889,7 @@ function toolHeader(name, state){
   const header=document.createElement("summary");
   header.className="hdr";
   const dot=document.createElement("span");
-  dot.className="dot "+(state==="done"?"done":"run");
+  dot.className="dot "+(state==="done"?"done":state==="failed"?"failed":"run");
   header.appendChild(dot);
   const label=document.createElement("span");
   label.textContent=String(name||"tool");
@@ -981,9 +985,13 @@ function setBody(el, text){
 /* ---------- helpers ---------- */
 document.getElementById("ring").onclick = ()=>{ if(streaming) stop(); else send(); };
 document.getElementById("input").addEventListener("keydown", e=>{
-  if(e.key === "Enter"){
+  if(e.key === "Enter" && e.ctrlKey){
+    e.preventDefault(); send();            // Ctrl+Enter always sends
+  }else if(e.key === "Enter"){
     // Mobile (coarse pointer): Enter = newline. Physical keyboard: Enter sends, Shift+Enter newline.
     if(FINE_POINTER && !e.shiftKey){ e.preventDefault(); send(); }
+  }else if(e.key === "Escape"){
+    e.target.blur();                        // Escape dismisses the keyboard
   }
 });
 document.getElementById("input").addEventListener("input", updateRingState);
