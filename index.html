@@ -253,6 +253,7 @@ const LS_KEY = "hermes-uplink-cfg";
 let cfg = loadCfg();
 let activeId = null;
 let streaming = false;
+let streamingSessionId = null;   // which session owns the active stream
 let currentAbort = null;
 const FINE_POINTER = window.matchMedia("(pointer: fine)").matches;
 
@@ -516,6 +517,11 @@ function renderSessions(sessions){
 }
 
 async function openSession(id, title){
+  // Session switch must sever any in-flight stream owned by the previous
+  // session: abort it, clear the streaming flags so the ring/send state is
+  // correct for the session being opened. The aborted server turn keeps
+  // running server-side and lands in history on next reload.
+  if(streaming && currentAbort){ try{ currentAbort.abort(); }catch(e){} }
   activeId = id;
   document.getElementById("activeTitle").textContent = title || id;
   try{
@@ -582,8 +588,9 @@ async function streamTurn(text, sessionId, opts={}){
   const addUser = opts.addUser !== false;
   const title = document.getElementById("activeTitle").textContent;
   if(addUser) addMsg("user", text);
-  streaming = true; updateRingState();
+  streaming = true; streamingSessionId = sessionId; updateRingState();
   const bubble = addMsg("assistant", "");
+  bubble.dataset.sid = sessionId;
   currentAbort = new AbortController();
   try{
     const r = await api("/api/sessions/"+encodeURIComponent(sessionId)+"/chat/stream", {
@@ -612,7 +619,7 @@ async function streamTurn(text, sessionId, opts={}){
     if(e && e.name === "AbortError") body.textContent += "\n[stopped]";
     else body.textContent += "\n[error] " + (e && e.message ? e.message : e);
   }finally{
-    streaming = false; currentAbort = null;
+    streaming = false; streamingSessionId = null; currentAbort = null;
     flushRender(bubble);
     updateRingState();
     if(activeId === sessionId) await openSession(sessionId, title);
@@ -636,6 +643,11 @@ function stop(){
 }
 
 function handleFrame(frame, bubble){
+  // Frames arriving for a session the user has switched away from are
+  // dropped: their turn keeps running server-side and appears in history
+  // on next reload. Without this, tool cards and deltas leak into the
+  // newly-selected session's thread.
+  if(bubble && bubble.dataset.sid && streamingSessionId && bubble.dataset.sid !== streamingSessionId) return;
   let event="message", data="";
   for(const line of frame.split(/\r?\n/)){
     if(line.startsWith("event:")) event = line.slice(6).trim();
@@ -654,13 +666,13 @@ function handleFrame(frame, bubble){
     maybeAutoscroll();
   }else if(event==="tool.started"){
     const name = (obj&&obj.name)||"tool";
-    addToolCard(name, obj&&obj.call_id, "run", "");
+    addToolCard(name, obj&&obj.call_id, "run", "", bubble);
   }else if(event==="tool.completed"){
     const cid = obj&&obj.call_id; const out = obj&&obj.output!=null?obj.output:"";
-    updateToolCard(cid, "done", typeof out==="string"?out:JSON.stringify(out,null,2));
+    updateToolCard(cid, "done", typeof out==="string"?out:JSON.stringify(out,null,2), bubble);
   }else if(event==="tool.failed"){
     const cid = obj&&obj.call_id; const out = obj&&obj.preview!=null?obj.preview:"";
-    updateToolCard(cid, "failed", typeof out==="string"?out:JSON.stringify(out,null,2));
+    updateToolCard(cid, "failed", typeof out==="string"?out:JSON.stringify(out,null,2), bubble);
   }else if(event==="run.completed"){
     /* server will re-sync history via openSession */
   }
@@ -769,8 +781,11 @@ function renderThread(msgs){
   }
   t.scrollTop = t.scrollHeight;
 }
-function addToolCard(name, cid, state, out){
-  const t = document.getElementById("thread");
+function addToolCard(name, cid, state, out, bubble){
+  // Tool cards belong to the turn that produced them: append to that
+  // bubble (staying inside its message flow), falling back to the thread
+  // only when no bubble is known.
+  const t = bubble || document.getElementById("thread");
   const c = document.createElement("details");
   c.className="msg tool"; c.dataset.cid = cid||"";
   if(state === "run") c.open = true;
@@ -782,13 +797,17 @@ function addToolCard(name, cid, state, out){
   c.appendChild(createCollapseBtn(c));
   t.appendChild(c); t.scrollTop=t.scrollHeight;
 }
-function updateToolCard(cid, state, out){
-  const target = cid ? document.querySelector('.msg.tool[data-cid="'+cid.replace(/"/g, '\\"')+'"]') : null;
-  const el = target || (document.querySelectorAll(".msg.tool").length ? document.querySelectorAll(".msg.tool")[document.querySelectorAll(".msg.tool").length-1] : null);
-  if(el){
-    el.querySelector(".dot").className="dot "+state;
-    setBody(el.querySelector(".body"), out);
-    if(state === "done") el.open = false;
+function updateToolCard(cid, state, out, bubble){
+  let target = cid ? document.querySelector('.msg.tool[data-cid="'+cid.replace(/"/g, '\\"')+'"]') : null;
+  if(!target && bubble){
+    // Scope the fallback to this turn's bubble: never touch a tool card
+    // belonging to another session's view.
+    target = bubble.querySelector('.msg.tool:last-of-type');
+  }
+  if(target){
+    target.querySelector(".dot").className="dot "+state;
+    setBody(target.querySelector(".body"), out);
+    if(state === "done") target.open = false;
   }
 }
 
