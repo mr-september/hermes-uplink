@@ -452,9 +452,10 @@ async function refresh(){
       const detailRes = await api("/api/sessions/"+encodeURIComponent(activeId));
       if(detailRes.ok){
         const detail = await detailRes.json();
-        const used = num(detail.context_used);
-        const limit = num(detail.context_window);
-        if(limit > 0 && used > 0) { d.context_used = used; d.context_window = limit; }
+        const used = num(detail.context_used ?? detail.contextTokens);
+        const limit = num(detail.context_limit ?? detail.context_window ?? detail.contextWindow ?? detail.max_tokens);
+        const occ = (typeof detail.occupancy_pct === "number") ? detail.occupancy_pct : null;
+        if(limit > 0 && used > 0) { d.context_used = used; d.context_limit = limit; if(occ != null) d.occupancy_pct = occ; }
       }
     }catch(e){}
 
@@ -533,9 +534,10 @@ async function openSession(id, title){
       const detailRes = await api("/api/sessions/"+encodeURIComponent(id));
       if(detailRes.ok){
         const detail = await detailRes.json();
-        const used = num(detail.context_used);
-        const limit = num(detail.context_window);
-        if(limit > 0 && used > 0) { data.context_used = used; data.context_window = limit; }
+        const used = num(detail.context_used ?? detail.contextTokens);
+        const limit = num(detail.context_limit ?? detail.context_window ?? detail.contextWindow ?? detail.max_tokens);
+        const occ = (typeof detail.occupancy_pct === "number") ? detail.occupancy_pct : null;
+        if(limit > 0 && used > 0) { data.context_used = used; data.context_limit = limit; if(occ != null) data.occupancy_pct = occ; }
       }
     }catch(e){}
 
