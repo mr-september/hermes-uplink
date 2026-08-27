@@ -44,6 +44,12 @@
   .new-chat-bar{border:none; padding:0 10px 6px}
   .new-chat-button{flex:1}
   .active-title{flex:1; font-size:13px; color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .idchip{display:inline-flex; align-items:center; gap:5px; flex:none; font:11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+          color:var(--muted); background:var(--bg3); border:1px solid var(--border); border-radius:999px; padding:4px 9px; cursor:pointer; user-select:none}
+  .idchip:hover{color:var(--text); border-color:var(--accent)}
+  .idchip.copied{color:var(--green); border-color:var(--green)}
+  .idchip .idchip-glyph{font-size:12px; line-height:1}
+  .copy-ta{position:fixed; top:0; left:0; width:1px; height:1px; opacity:0; border:0}
 
   #search{padding:8px 10px}
   #sessionList{flex:1; overflow:auto; padding:0 8px 8px}
@@ -188,6 +194,9 @@
       <button class="toolbtn" id="menuBtn" title="Sessions">&#9776;</button>
       <button class="toolbtn" id="infoBtn" title="Capabilities">&#9432;</button>
       <div class="active-title" id="activeTitle">No session — start or pick one</div>
+      <button class="idchip hidden" id="idChip" type="button" title="Copy session ID">
+        <span class="idchip-glyph">&#128203;</span><span class="idchip-id"></span>
+      </button>
       <span id="statusDot" class="dot" title="Connection status"></span>
       <button class="toolbtn" id="refreshBtn" title="Refresh (or just switch to this tab)">&#8635;</button>
       <button class="toolbtn" id="rightBtn" title="Skills / Tools">&#9881;</button>
@@ -517,6 +526,41 @@ function renderSessions(sessions){
   }
 }
 
+// ---- session ID copy chip ----
+function updateIdChip(){
+  const chip = document.getElementById("idChip");
+  if(!chip) return;
+  const idEl = chip.querySelector(".idchip-id");
+  if(!activeId){ chip.classList.add("hidden"); return; }
+  chip.classList.remove("hidden");
+  idEl.textContent = activeId.length > 8 ? activeId.slice(-7) : activeId;
+  chip.title = "Copy session ID: " + activeId;
+}
+function copyActiveId(){
+  if(!activeId) return;
+  const ok = ()=>{ flashCopied(); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(activeId).then(ok).catch(()=>fallbackCopy(activeId, ok));
+  } else { fallbackCopy(activeId, ok); }
+}
+function fallbackCopy(text, cb){
+  try{
+    const ta = document.createElement("textarea");
+    ta.className = "copy-ta"; ta.value = text;
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); document.body.removeChild(ta); cb();
+  }catch(e){ /* clipboard unavailable */ }
+}
+function flashCopied(){
+  const chip = document.getElementById("idChip");
+  if(!chip) return;
+  const idEl = chip.querySelector(".idchip-id");
+  const prev = idEl.textContent;
+  chip.classList.add("copied"); idEl.textContent = "✓";
+  setTimeout(()=>{ chip.classList.remove("copied"); idEl.textContent = prev; }, 1200);
+}
+document.getElementById("idChip").addEventListener("click", copyActiveId);
+
 async function openSession(id, title){
   // Session switch must sever any in-flight stream owned by the previous
   // session: abort it, clear the streaming flags so the ring/send state is
@@ -524,6 +568,7 @@ async function openSession(id, title){
   // running server-side and lands in history on next reload.
   if(streaming && currentAbort){ try{ currentAbort.abort(); }catch(e){} }
   activeId = id;
+  updateIdChip();
   document.getElementById("activeTitle").textContent = title || id;
   try{
     const r = await api("/api/sessions/"+encodeURIComponent(id)+"/messages");
