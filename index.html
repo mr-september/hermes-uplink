@@ -269,6 +269,12 @@
   .custom-apply-btn{align-self:flex-end}
   .model-custom-action{font-size:11px}
   .model-active-check{color:var(--green); font-weight:bold}
+  /* toast notifications */
+  #toastContainer{position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:1000; display:flex; flex-direction:column; gap:8px; pointer-events:none; max-width:min(480px,92vw); width:max-content}
+  .toast{background:var(--bg2); border:1px solid var(--border); color:var(--text); padding:10px 16px; border-radius:8px; font-size:13px; box-shadow:0 4px 16px rgba(0,0,0,0.5); pointer-events:auto; display:flex; align-items:center; gap:8px; opacity:0; transform:translateY(12px); transition:opacity 0.2s ease, transform 0.2s ease}
+  .toast.show{opacity:1; transform:translateY(0)}
+  .toast.error{border-color:var(--red); color:#ff7b72}
+  .toast.success{border-color:var(--green); color:#7ee787}
   @media (max-width:600px){
     .modelchip{max-width:120px}
   }
@@ -376,6 +382,7 @@
   </div>
 
   <div class="scrim hidden" id="scrim"></div>
+  <div id="toastContainer"></div>
 
   <!-- passphrase gate (one-time per browser session) -->
   <div class="modal hidden" id="authModal">
@@ -442,6 +449,20 @@ function showAuth(message){
   modal.classList.remove("hidden");
   document.getElementById("authInput").focus();
 }
+function showToast(text, type="info"){
+  const container = document.getElementById("toastContainer");
+  if(!container) return;
+  const toast = document.createElement("div");
+  toast.className = "toast" + (type ? " " + type : "");
+  toast.textContent = String(text);
+  container.appendChild(toast);
+  requestAnimationFrame(()=>{ toast.classList.add("show"); });
+  setTimeout(()=>{
+    toast.classList.remove("show");
+    setTimeout(()=>{ toast.remove(); }, 250);
+  }, 3500);
+}
+
 async function ensureAuth(){
   if(new URLSearchParams(window.location.search).has("t")){
     const newUrl = window.location.pathname + window.location.hash;
@@ -451,7 +472,7 @@ async function ensureAuth(){
     const r = await api("/api/sessions?limit=1");
     if(r.status !== 401) return true;
     if(externalMode()){
-      alert("External API unauthorized. Check the API key in Settings.");
+      showToast("External API unauthorized. Check the API key in Settings.", "error");
       return true;
     }
   }catch(e){
@@ -847,7 +868,7 @@ async function submitClarifyResponse(clarifyId, answer, cardEl){
     settleClarifyCard(clarifyId, answer, cardEl);
   }catch(e){
     if(cardEl) cardEl.classList.remove("submitting");
-    alert("Could not submit clarify response: " + e.message);
+    showToast("Could not submit clarify response: " + e.message, "error");
   }finally{
     if(activeClarifyId === clarifyId) activeClarifyId = null;
   }
@@ -1189,7 +1210,7 @@ async function applyModel(model, provider, setDefault = false){
     closeModelModal();
   }catch(e){
     if(diag) diag.textContent = "Failed to switch model: " + (e.message || e);
-    else alert("Failed to switch model: " + (e.message || e));
+    else showToast("Failed to switch model: " + (e.message || e), "error");
   }
 }
 
@@ -1390,7 +1411,7 @@ async function newSession(){
     updateModelChip(currentSessionModel, currentSessionProvider);
     await loadSessions();
     await openSession(id, "New chat");
-  }catch(e){ alert("New chat failed: "+e.message); }
+  }catch(e){ showToast("New chat failed: " + e.message, "error"); }
 }
 
 /* ---------- chat / streaming ---------- */
@@ -1929,39 +1950,68 @@ function createThoughtCard(thoughtText, open){
   card.appendChild(createCollapseBtn(card));
   return card;
 }
+function splitCodeFences(text){
+  if(!text) return [];
+  const regex = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]*`)/g;
+  const parts = [];
+  let lastIndex = 0;
+  let match;
+  while((match = regex.exec(text)) !== null){
+    if(match.index > lastIndex){
+      parts.push({type: "text", content: text.slice(lastIndex, match.index)});
+    }
+    parts.push({type: "code", content: match[0]});
+    lastIndex = regex.lastIndex;
+  }
+  if(lastIndex < text.length){
+    parts.push({type: "text", content: text.slice(lastIndex)});
+  }
+  return parts;
+}
 function extractModelTags(text){
   if(!text) return {thoughts: [], toolCalls: [], activeThought: "", cleanText: ""};
-  let clean = String(text);
+  const parts = splitCodeFences(String(text));
   const thoughts = [];
   const toolCalls = [];
   let activeThought = "";
 
-  clean = clean.replace(/<(?:thought|reasoning)>([\s\S]*?)<\/(?:thought|reasoning)>/gi, (match, inner)=>{
-    if(inner.trim()) thoughts.push(inner.trim());
-    return "";
-  });
+  const cleanParts = parts.map((part, pIdx)=>{
+    if(part.type === "code") return part.content;
+    let clean = part.content;
 
-  const openThoughtMatch = clean.match(/<(?:thought|reasoning)>([\s\S]*)$/i);
-  if(openThoughtMatch){
-    activeThought = openThoughtMatch[1].trim();
-    clean = clean.slice(0, openThoughtMatch.index);
-  }
+    clean = clean.replace(/<(?:thought|reasoning)>([\s\S]*?)<\/(?:thought|reasoning)>/gi, (match, inner)=>{
+      if(inner.trim()) thoughts.push(inner.trim());
+      return "";
+    });
 
-  clean = clean.replace(/<tool_call>([\s\S]*?)<\/tool_call>/gi, (match, inner)=>{
-    const trimmed = inner.trim();
-    if(trimmed){
-      try{ toolCalls.push(JSON.parse(trimmed)); }
-      catch{ toolCalls.push({raw: trimmed}); }
+    if(pIdx === parts.length - 1){
+      const openThoughtMatch = clean.match(/<(?:thought|reasoning)>([\s\S]*)$/i);
+      if(openThoughtMatch){
+        activeThought = openThoughtMatch[1].trim();
+        clean = clean.slice(0, openThoughtMatch.index);
+      }
     }
-    return "";
+
+    clean = clean.replace(/<tool_call>([\s\S]*?)<\/tool_call>/gi, (match, inner)=>{
+      const trimmed = inner.trim();
+      if(trimmed){
+        try{ toolCalls.push(JSON.parse(trimmed)); }
+        catch{ toolCalls.push({raw: trimmed}); }
+      }
+      return "";
+    });
+
+    if(pIdx === parts.length - 1){
+      const openToolMatch = clean.match(/<tool_call>([\s\S]*)$/i);
+      if(openToolMatch){
+        clean = clean.slice(0, openToolMatch.index);
+      }
+    }
+
+    return clean;
   });
 
-  const openToolMatch = clean.match(/<tool_call>([\s\S]*)$/i);
-  if(openToolMatch){
-    clean = clean.slice(0, openToolMatch.index);
-  }
-
-  return {thoughts, toolCalls, activeThought, cleanText: clean.trim()};
+  return {thoughts, toolCalls, activeThought, cleanText: cleanParts.join("").trim()};
 }
 function escapeHtml(value){
   return String(value==null?"" : value).replace(/[&<>\"']/g, char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
@@ -2093,8 +2143,12 @@ function secureHtml(html){
 }
 function setBody(el, text){
   const parsed = extractModelTags(text);
-  const safeText = String(parsed.cleanText).replace(/<(?=[a-zA-Z\/!\?])/gi, "&lt;");
-  el.innerHTML = secureHtml(renderMarkdown(safeText));
+  const parts = splitCodeFences(parsed.cleanText);
+  const safeParts = parts.map(part => {
+    if(part.type === "code") return part.content;
+    return part.content.replace(/<(?=[a-zA-Z\/!\?])/gi, "&lt;");
+  });
+  el.innerHTML = secureHtml(renderMarkdown(safeParts.join("")));
 }
 
 /* ---------- helpers ---------- */
