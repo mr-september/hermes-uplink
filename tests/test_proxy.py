@@ -16,6 +16,7 @@ import proxy  # noqa: E402
 
 class UpstreamHandler(BaseHTTPRequestHandler):
     last_authorization = None
+    last_content_length = None
 
     def _send(self, body=b'{"sessions":[]}'):
         self.send_response(200)
@@ -36,6 +37,7 @@ class UpstreamHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         UpstreamHandler.last_authorization = self.headers.get("Authorization")
+        UpstreamHandler.last_content_length = self.headers.get("Content-Length")
         length = int(self.headers.get("Content-Length", "0"))
         if length:
             self.rfile.read(length)
@@ -209,6 +211,28 @@ class ProxyIntegrationTests(unittest.TestCase):
             proxy.validate_upstream("https://example.test:8642", allow_remote=True),
             "https://example.test:8642",
         )
+
+    def test_empty_body_post_forwards_content_length_zero(self):
+        cookie = self.authenticate()
+        UpstreamHandler.last_content_length = None
+        status, _, body = self.request(
+            "POST",
+            "/api/sessions",
+            body=b"",
+            headers={"Cookie": cookie, "Content-Length": "0", "Content-Type": "application/json"},
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(UpstreamHandler.last_content_length, "0")
+
+    def test_compute_current_hashes_and_check_pinned_hashes(self):
+        current = proxy.compute_current_hashes()
+        self.assertEqual(current["assets"], proxy.PINNED_ASSET_HASHES)
+        self.assertEqual(current["script"], proxy.INLINE_SCRIPT_HASH)
+        self.assertEqual(current["style"], proxy.INLINE_STYLE_HASH)
+
+        is_match, _, mismatches = proxy.check_pinned_hashes()
+        self.assertTrue(is_match)
+        self.assertEqual(mismatches, [])
 
 
 if __name__ == "__main__":

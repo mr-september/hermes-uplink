@@ -49,6 +49,9 @@ Instead of relying on bandwidth-heavy screen sharing or transferring project dat
 
 ## Architecture
 
+> [!TIP]
+> For the comprehensive multi-resolution C4 architecture specification, runtime sequence flows, wire protocol contracts, and module matrices, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 ```mermaid
 flowchart LR
     subgraph EDGE["Edge device (phone / laptop)"]
