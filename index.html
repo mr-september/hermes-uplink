@@ -51,6 +51,13 @@
   .idchip .idchip-glyph{font-size:12px; line-height:1}
   .copy-ta{position:fixed; top:0; left:0; width:1px; height:1px; opacity:0; border:0}
 
+  .modelchip{display:inline-flex; align-items:center; gap:5px; flex:none; font:11px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+             color:var(--text); background:var(--bg3); border:1px solid var(--border); border-radius:999px; padding:4px 9px; cursor:pointer; user-select:none; max-width:200px}
+  .modelchip:hover{color:var(--accent); border-color:var(--accent)}
+  .modelchip .modelchip-icon{font-size:11px; color:var(--accent); line-height:1}
+  .modelchip .modelchip-text{overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .modelchip.loading{opacity:0.65}
+
   #search{padding:8px 10px}
   #sessionList{flex:1; overflow:auto; padding:0 8px 8px}
   .sess{padding:9px 10px; border-radius:8px; cursor:pointer; border:1px solid transparent; margin-bottom:4px}
@@ -75,6 +82,19 @@
   .tool .hdr::after{content:"▼"; font-size:10px; margin-left:auto; color:var(--muted); transition:transform 0.2s}
   .msg.tool[open] .hdr::after{transform:rotate(180deg)}
   .tool .body{color:var(--text); white-space:pre-wrap; word-break:break-word; max-height:min(400px, 60vh); overflow-y:auto}
+  .tool-sec{margin-bottom:8px}
+  .tool-sec:last-child{margin-bottom:0}
+  .tool-sec-h{font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; color:var(--muted); margin-bottom:3px}
+  .tool-sec pre{margin:0}
+  .tool-running{color:var(--muted); font-style:italic}
+  .msg.thought{align-self:flex-start; background:#161b2288; border:1px dashed var(--border); font-size:12px; width:92%; margin:4px 0}
+  .msg.thought .hdr{display:flex; align-items:center; gap:6px; font-weight:600; color:var(--muted); cursor:pointer; user-select:none; list-style:none; outline:none}
+  .msg.thought .hdr::-webkit-details-marker{display:none}
+  .msg.thought .hdr::after{content:"▼"; font-size:10px; margin-left:auto; color:var(--muted); transition:transform 0.2s}
+  .msg.thought[open] .hdr{border-bottom:1px solid var(--border); padding-bottom:6px; margin-bottom:6px}
+  .msg.thought[open] .hdr::after{transform:rotate(180deg)}
+  .msg.thought .body{color:var(--muted); font-style:italic; white-space:pre-wrap; word-break:break-word; max-height:min(300px, 40vh); overflow-y:auto}
+  .msg.assistant > .msg.tool, .msg.assistant > .msg.thought{width:100%; max-width:100%; margin:8px 0; box-sizing:border-box}
   .tool-collapse-btn{display:block; width:100%; margin-top:8px; background:transparent; border:1px solid var(--border); color:var(--muted); font-size:11px; padding:4px; border-radius:6px; cursor:pointer; text-align:center}
   .tool-collapse-btn:hover{background:var(--bg3); color:var(--text); border-color:var(--muted)}
 
@@ -174,6 +194,85 @@
     .sess .t{font-size:15px}
     #composer textarea{resize:none}
   }
+
+  /* clarify interactive card */
+  .clarify-card{border:1px solid var(--border); border-radius:10px; padding:12px; margin:8px 0; background:var(--bg3); display:flex; flex-direction:column; gap:10px; width:100%}
+  .clarify-hdr{display:flex; align-items:flex-start; justify-content:space-between; gap:8px}
+  .clarify-q{font-weight:600; font-size:13px; color:var(--text); line-height:1.4; flex:1}
+  .clarify-badge{font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:0.5px; padding:2px 6px; border-radius:4px; flex:none}
+  .clarify-badge.low{background:#23863622; color:var(--green); border:1px solid #23863655}
+  .clarify-badge.medium{background:#1f6feb22; color:var(--accent); border:1px solid #1f6feb55}
+  .clarify-badge.high{background:#d2992222; color:var(--yellow); border:1px solid #d2992255}
+  .clarify-badge.blocking{background:#da363322; color:var(--red); border:1px solid #da363355}
+  .clarify-timer{font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .clarify-choices{display:flex; flex-direction:column; gap:6px}
+  .clarify-choice-btn{display:flex; align-items:center; gap:8px; width:100%; text-align:left; background:var(--bg2); border:1px solid var(--border); border-radius:6px; padding:8px 10px; color:var(--text); cursor:pointer; font-size:12px; transition:all 0.15s; user-select:none}
+  .clarify-choice-btn:hover{background:var(--bg); border-color:var(--accent); color:var(--accent)}
+  .clarify-choice-btn.selected{background:#1f6feb22; border-color:var(--accent); color:var(--accent)}
+  .clarify-kbd{display:inline-flex; align-items:center; justify-content:center; width:20px; height:20px; border-radius:4px; background:var(--bg3); border:1px solid var(--border); font-size:10px; font-weight:600; flex:none; color:var(--muted)}
+  .clarify-choice-btn.selected .clarify-kbd{background:var(--accent); color:#fff; border-color:var(--accent)}
+  .clarify-rec{font-size:10px; color:var(--muted); margin-left:4px; font-weight:normal}
+  .clarify-check-row{display:flex; align-items:center; gap:8px; padding:6px 8px; border-radius:6px; background:var(--bg2); border:1px solid var(--border); cursor:pointer; font-size:12px; user-select:none}
+  .clarify-check-row input[type="checkbox"]{cursor:pointer}
+  .clarify-other-wrap{display:flex; flex-direction:column; gap:4px; margin-top:4px}
+  .clarify-other-input{width:100%; min-height:36px; max-height:120px; padding:6px 8px; border-radius:6px; background:var(--bg2); border:1px solid var(--border); color:var(--text); font-size:12px; resize:vertical; outline:none}
+  .clarify-other-input:focus{border-color:var(--accent)}
+  .clarify-actions{display:flex; align-items:center; justify-content:flex-end; gap:8px; margin-top:4px}
+  .clarify-skip-btn{background:transparent; border:1px solid var(--border); color:var(--muted); font-size:11px; padding:5px 10px; border-radius:6px; cursor:pointer}
+  .clarify-skip-btn:hover{background:var(--bg2); color:var(--text)}
+  .clarify-submit-btn{background:var(--accent); border:1px solid var(--accent); color:#fff; font-size:11px; font-weight:600; padding:5px 12px; border-radius:6px; cursor:pointer}
+  .clarify-submit-btn:hover{opacity:0.9}
+  .clarify-submit-btn:disabled{opacity:0.5; cursor:not-allowed}
+  .clarify-card.submitting{opacity:0.6; pointer-events:none}
+  .clarify-card.settled{border-left:3px solid var(--accent); background:var(--bg2); padding:10px 12px}
+  .clarify-card.settled .clarify-answer{font-size:12px; color:var(--text); margin-top:4px; display:flex; align-items:center; gap:6px; flex-wrap:wrap}
+  .clarify-card.settled .clarify-ans-badge{font-size:10px; font-weight:600; background:#1f6feb22; color:var(--accent); padding:2px 6px; border-radius:4px; border:1px solid #1f6feb55}
+  .clarify-card.settled .clarify-ans-skipped{font-style:italic; color:var(--muted)}
+  .clarify-batch-group{border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px; background:var(--bg2)}
+  .clarify-batch-title{font-size:12px; font-weight:600; color:var(--text); margin-bottom:6px}
+  .clarify-batch-progress{font-size:11px; color:var(--muted); font-weight:normal}
+
+  /* model picker modal */
+  #modelModal .box{width:min(520px,94vw); max-height:86vh; display:flex; flex-direction:column; padding:18px}
+  .model-search-wrap{margin:10px 0 8px}
+  #modelSearchInput{width:100%; padding:8px 10px; font-size:13px}
+  .model-list-container{flex:1; overflow-y:auto; min-height:140px; max-height:48vh; display:flex; flex-direction:column; gap:8px; padding-right:4px; margin:4px 0}
+  .model-provider-group{border:1px solid var(--border); border-radius:8px; background:var(--bg); overflow:hidden}
+  .model-provider-hdr{padding:8px 10px; font-size:12px; font-weight:600; background:var(--bg3); display:flex; justify-content:space-between; align-items:center; color:var(--muted); cursor:pointer; user-select:none}
+  .model-provider-hdr:hover{color:var(--text)}
+  .model-provider-hdr::after{content:"▼"; font-size:9px; margin-left:6px; color:var(--muted); transition:transform 0.15s}
+  .model-provider-group.collapsed .model-provider-hdr::after{transform:rotate(-90deg)}
+  .model-provider-group.collapsed .model-items{display:none}
+  .model-provider-badge{font-size:10px; padding:2px 6px; border-radius:4px; background:var(--bg2); border:1px solid var(--border)}
+  .model-items{display:flex; flex-direction:column}
+  .model-item{padding:8px 10px; border-top:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; cursor:pointer; font-size:12px; gap:8px; transition:background 0.1s}
+  .model-item:hover{background:var(--bg2); color:var(--accent)}
+  .model-item.active{background:#1f6feb22; border-left:3px solid var(--accent); color:var(--text)}
+  .model-item-name{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-weight:500; word-break:break-all}
+  .model-item-meta{display:flex; align-items:center; gap:6px; flex:none}
+  .model-price-badge{font-size:10px; padding:1px 5px; border-radius:4px; background:var(--bg3); color:var(--muted); border:1px solid var(--border)}
+  .model-price-badge.free{color:var(--green); border-color:#3fb95055; background:#2386361a}
+  .model-custom-sec{border-top:1px solid var(--border); padding-top:10px; margin-top:8px}
+  .model-custom-toggle{font-size:12px; color:var(--accent2); background:none; border:none; padding:0; cursor:pointer; text-decoration:underline}
+  .model-custom-inputs{margin-top:8px; display:flex; flex-direction:column; gap:8px}
+  .model-row{display:flex; gap:8px}
+  .model-checkbox-row{display:flex; align-items:center; gap:8px; margin-top:8px; font-size:12px; color:var(--muted); cursor:pointer; user-select:none}
+  .model-checkbox-row input[type="checkbox"]{width:auto; cursor:pointer}
+  .model-custom-item{padding:9px 10px; border:1px dashed var(--accent); border-radius:6px; background:#1f6feb11; cursor:pointer; font-size:12px; color:var(--accent); display:flex; align-items:center; justify-content:space-between}
+  .model-custom-item:hover{background:#1f6feb22}
+  .modal-hdr-row{display:flex; justify-content:space-between; align-items:center}
+  .modal-close-btn{width:28px; height:28px; font-size:14px; line-height:1; padding:0}
+  .model-loading-msg{color:var(--muted); padding:12px; text-align:center}
+  .model-custom-hdr{display:flex; justify-content:space-between; align-items:center}
+  .custom-prov-input{flex:1}
+  .custom-mod-input{flex:2}
+  .custom-apply-btn{align-self:flex-end}
+  .model-custom-action{font-size:11px}
+  .model-active-check{color:var(--green); font-weight:bold}
+  @media (max-width:600px){
+    .modelchip{max-width:120px}
+  }
+
 </style>
 </head>
 <body>
@@ -194,6 +293,9 @@
       <button class="toolbtn" id="menuBtn" title="Sessions">&#9776;</button>
       <button class="toolbtn" id="infoBtn" title="Capabilities">&#9432;</button>
       <div class="active-title" id="activeTitle">No session — start or pick one</div>
+      <button class="modelchip" id="modelChip" type="button" title="Active Model — click to switch">
+        <span class="modelchip-icon">⚡</span><span class="modelchip-text" id="modelChipText">Model</span>
+      </button>
       <button class="idchip hidden" id="idChip" type="button" title="Copy session ID">
         <span class="idchip-glyph">&#128203;</span><span class="idchip-id"></span>
       </button>
@@ -218,6 +320,40 @@
     </div>
     <div class="list" id="skillsList"></div>
     <div class="list hidden" id="toolsList"></div>
+  </div>
+
+  <!-- model selector modal -->
+  <div class="modal hidden" id="modelModal">
+    <div class="box">
+      <div class="modal-hdr-row">
+        <h3 class="modal-title">Select Model</h3>
+        <button class="toolbtn modal-close-btn" id="modelModalClose">✕</button>
+      </div>
+      <div class="modal-subtitle">Switch active LLM provider or model for this session.</div>
+      <div class="model-search-wrap">
+        <input id="modelSearchInput" placeholder="Search provider or model (e.g. claude, gpt, deepseek)…" autocomplete="off" />
+      </div>
+      <div class="model-list-container" id="modelListContainer">
+        <div class="model-loading-msg">Loading available models…</div>
+      </div>
+      <div class="model-custom-sec">
+        <div class="model-custom-hdr">
+          <button type="button" class="model-custom-toggle" id="modelCustomToggle">+ Manual custom model</button>
+        </div>
+        <div class="model-custom-inputs hidden" id="modelCustomWrap">
+          <div class="model-row">
+            <input id="customProviderInput" class="custom-prov-input" placeholder="Provider (e.g. nous, openrouter, custom, ollama)" />
+            <input id="customModelInput" class="custom-mod-input" placeholder="Model (e.g. meta-llama/llama-3.3-70b-instruct)" />
+          </div>
+          <button type="button" class="primary custom-apply-btn" id="customModelApplyBtn">Apply Custom Model</button>
+        </div>
+      </div>
+      <label class="model-checkbox-row">
+        <input type="checkbox" id="modelSetDefault" />
+        <span>Set as default model for new chats</span>
+      </label>
+      <div class="diag" id="modelDiag"></div>
+    </div>
   </div>
 
   <!-- settings modal -->
@@ -430,6 +566,633 @@ function updateRingState(){
   }
 }
 
+
+/* ---------- clarify interactive card support ---------- */
+let activeClarifyId = null;
+
+function stripRecommended(text){
+  if(typeof text !== "string") return text;
+  return text.replace(/\s*\(Recommended\)\s*$/i, "").trim();
+}
+
+function renderClarifyCard(payload, bubble){
+  const target = bubble || document.getElementById("thread");
+  const cid = payload.clarify_id;
+  activeClarifyId = cid;
+
+  // If a card with this clarify_id already exists in target, don't duplicate
+  let existing = target.querySelector(`.clarify-card[data-cid="${cid}"]`);
+  if(existing) return existing;
+
+  const card = document.createElement("div");
+  card.className = "clarify-card pending";
+  card.dataset.cid = cid;
+
+  const isBatch = Array.isArray(payload.questions) && payload.questions.length > 0;
+  const isMulti = Boolean(payload.multi_select);
+  const urgency = String(payload.urgency || "medium").toLowerCase();
+  const timeoutSec = Number(payload.timeout_seconds || 0);
+
+  // Header: Question & Urgency Badge
+  const hdr = document.createElement("div");
+  hdr.className = "clarify-hdr";
+
+  const qTitle = document.createElement("div");
+  qTitle.className = "clarify-q";
+  qTitle.textContent = payload.question || (isBatch ? "Please answer the questions below:" : "Clarifying Question");
+  hdr.appendChild(qTitle);
+
+  if(urgency){
+    const badge = document.createElement("span");
+    badge.className = "clarify-badge " + urgency;
+    badge.textContent = urgency === "blocking" ? "Blocking" : urgency;
+    hdr.appendChild(badge);
+  }
+  card.appendChild(hdr);
+
+  // Live Timer if timeout is configured
+  let timerInterval = null;
+  if(timeoutSec > 0 && urgency !== "blocking"){
+    const timerEl = document.createElement("div");
+    timerEl.className = "clarify-timer";
+    let remaining = timeoutSec;
+    const updateTimerText = ()=>{
+      if(remaining <= 0){
+        timerEl.textContent = "Time expired";
+        if(timerInterval) clearInterval(timerInterval);
+      } else {
+        const m = Math.floor(remaining / 60);
+        const s = remaining % 60;
+        timerEl.textContent = `Auto-resolves in ${m}:${s < 10 ? '0' : ''}${s}`;
+      }
+    };
+    updateTimerText();
+    timerInterval = setInterval(()=>{ remaining--; updateTimerText(); }, 1000);
+    card.appendChild(timerEl);
+  }
+
+  // Choices Rendering
+  const choicesContainer = document.createElement("div");
+  choicesContainer.className = "clarify-choices";
+
+  if(isBatch){
+    // Batch Composite Form
+    const batchState = {};
+    payload.questions.forEach((qItem, qIdx)=>{
+      const qid = qItem.qid || ("q" + qIdx);
+      const bGroup = document.createElement("div");
+      bGroup.className = "clarify-batch-group";
+      
+      const bTitle = document.createElement("div");
+      bTitle.className = "clarify-batch-title";
+      bTitle.textContent = `${qIdx + 1}. ${qItem.question}`;
+      bGroup.appendChild(bTitle);
+
+      const bChoices = qItem.choices || [];
+      if(bChoices.length > 0){
+        bChoices.forEach((ch, cIdx)=>{
+          const char = String.fromCharCode(65 + cIdx);
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "clarify-choice-btn";
+          btn.innerHTML = `<span class="clarify-kbd">${char}</span><span>${ch}</span>`;
+          btn.onclick = ()=>{
+            bGroup.querySelectorAll(".clarify-choice-btn").forEach(x=>x.classList.remove("selected"));
+            btn.classList.add("selected");
+            batchState[qid] = stripRecommended(ch);
+          };
+          bGroup.appendChild(btn);
+        });
+      } else {
+        const txt = document.createElement("textarea");
+        txt.className = "clarify-other-input";
+        txt.placeholder = "Type your response...";
+        txt.rows = 2;
+        txt.oninput = ()=>{ batchState[qid] = txt.value.trim(); };
+        bGroup.appendChild(txt);
+      }
+      choicesContainer.appendChild(bGroup);
+    });
+
+    const actBar = document.createElement("div");
+    actBar.className = "clarify-actions";
+
+    const skipBtn = document.createElement("button");
+    skipBtn.type = "button";
+    skipBtn.className = "clarify-skip-btn";
+    skipBtn.textContent = "Skip All";
+    skipBtn.onclick = ()=>{
+      if(timerInterval) clearInterval(timerInterval);
+      submitClarifyResponse(cid, "", card);
+    };
+
+    const subBtn = document.createElement("button");
+    subBtn.type = "button";
+    subBtn.className = "clarify-submit-btn";
+    subBtn.textContent = "Submit All Answers";
+    subBtn.onclick = ()=>{
+      if(timerInterval) clearInterval(timerInterval);
+      submitClarifyResponse(cid, JSON.stringify({answers: batchState}), card);
+    };
+
+    actBar.append(skipBtn, subBtn);
+    card.append(choicesContainer, actBar);
+
+  } else {
+    // Single Question (Single-select / Multi-select / Open-ended)
+    const rawChoices = payload.choices || [];
+    let selectedAnswer = null;
+    const multiSelected = new Set();
+    let otherInput = null;
+
+    if(rawChoices.length > 0){
+      if(!isMulti){
+        // Single-select buttons
+        rawChoices.forEach((choiceText, idx)=>{
+          const char = String.fromCharCode(65 + idx);
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "clarify-choice-btn";
+          const isRec = choiceText.toLowerCase().includes("(recommended)");
+          const bare = stripRecommended(choiceText);
+          btn.innerHTML = `<span class="clarify-kbd">${char}</span><span>${bare}</span>${isRec ? '<span class="clarify-rec">(Recommended)</span>' : ''}`;
+          btn.onclick = ()=>{
+            choicesContainer.querySelectorAll(".clarify-choice-btn").forEach(x=>x.classList.remove("selected"));
+            btn.classList.add("selected");
+            selectedAnswer = bare;
+            if(otherInput) otherInput.value = "";
+          };
+          choicesContainer.appendChild(btn);
+        });
+      } else {
+        // Multi-select checkboxes
+        rawChoices.forEach((choiceText, idx)=>{
+          const bare = stripRecommended(choiceText);
+          const row = document.createElement("label");
+          row.className = "clarify-check-row";
+          const cb = document.createElement("input");
+          cb.type = "checkbox";
+          cb.onchange = ()=>{
+            if(cb.checked) multiSelected.add(bare);
+            else multiSelected.delete(bare);
+          };
+          row.append(cb, document.createTextNode(choiceText));
+          choicesContainer.appendChild(row);
+        });
+      }
+
+      // "Other" free-text row
+      const otherWrap = document.createElement("div");
+      otherWrap.className = "clarify-other-wrap";
+      otherInput = document.createElement("textarea");
+      otherInput.className = "clarify-other-input";
+      otherInput.placeholder = "Other (type custom answer)...";
+      otherInput.rows = 1;
+      otherInput.onfocus = ()=>{
+        if(!isMulti){
+          choicesContainer.querySelectorAll(".clarify-choice-btn").forEach(x=>x.classList.remove("selected"));
+          selectedAnswer = null;
+        }
+      };
+      otherInput.onkeydown = (e)=>{
+        if(e.key === "Enter" && !e.shiftKey){
+          e.preventDefault();
+          const ans = otherInput.value.trim();
+          if(ans){
+            if(timerInterval) clearInterval(timerInterval);
+            submitClarifyResponse(cid, ans, card);
+          }
+        }
+      };
+      otherWrap.appendChild(otherInput);
+      choicesContainer.appendChild(otherWrap);
+
+    } else {
+      // Pure open-ended prompt
+      const otherWrap = document.createElement("div");
+      otherWrap.className = "clarify-other-wrap";
+      otherInput = document.createElement("textarea");
+      otherInput.className = "clarify-other-input";
+      otherInput.placeholder = "Type your response here...";
+      otherInput.rows = 2;
+      otherInput.onkeydown = (e)=>{
+        if(e.key === "Enter" && !e.shiftKey){
+          e.preventDefault();
+          const ans = otherInput.value.trim();
+          if(ans){
+            if(timerInterval) clearInterval(timerInterval);
+            submitClarifyResponse(cid, ans, card);
+          }
+        }
+      };
+      otherWrap.appendChild(otherInput);
+      choicesContainer.appendChild(otherWrap);
+    }
+
+    const actBar = document.createElement("div");
+    actBar.className = "clarify-actions";
+
+    const skipBtn = document.createElement("button");
+    skipBtn.type = "button";
+    skipBtn.className = "clarify-skip-btn";
+    skipBtn.textContent = "Skip";
+    skipBtn.onclick = ()=>{
+      if(timerInterval) clearInterval(timerInterval);
+      submitClarifyResponse(cid, "", card);
+    };
+
+    const subBtn = document.createElement("button");
+    subBtn.type = "button";
+    subBtn.className = "clarify-submit-btn";
+    subBtn.textContent = "Submit";
+    subBtn.onclick = ()=>{
+      if(timerInterval) clearInterval(timerInterval);
+      let finalAns = "";
+      if(isMulti){
+        const list = Array.from(multiSelected);
+        if(otherInput && otherInput.value.trim()) list.push(otherInput.value.trim());
+        finalAns = JSON.stringify(list);
+      } else {
+        finalAns = (otherInput && otherInput.value.trim()) || selectedAnswer || "";
+      }
+      submitClarifyResponse(cid, finalAns, card);
+    };
+
+    actBar.append(skipBtn, subBtn);
+    card.append(choicesContainer, actBar);
+  }
+
+  target.appendChild(card);
+  maybeAutoscroll();
+  return card;
+}
+
+async function submitClarifyResponse(clarifyId, answer, cardEl){
+  if(cardEl) cardEl.classList.add("submitting");
+  try{
+    const res = await api("/api/sessions/" + encodeURIComponent(activeId) + "/clarify/respond", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({clarify_id: clarifyId, answer: answer})
+    });
+    if(!res.ok){
+      const err = await res.json().catch(()=>({}));
+      if(res.status === 409){
+        // Already resolved or expired; settle card gracefully
+        settleClarifyCard(clarifyId, answer || "(Expired)", cardEl);
+        return;
+      }
+      throw new Error(err.error?.message || "Status " + res.status);
+    }
+    settleClarifyCard(clarifyId, answer, cardEl);
+  }catch(e){
+    if(cardEl) cardEl.classList.remove("submitting");
+    alert("Could not submit clarify response: " + e.message);
+  }finally{
+    if(activeClarifyId === clarifyId) activeClarifyId = null;
+  }
+}
+
+function settleClarifyCard(clarifyId, answerText, targetOrBubble){
+  const cid = clarifyId || "";
+  const root = targetOrBubble || document.getElementById("thread");
+  const card = root.querySelector(`.clarify-card[data-cid="${cid}"]`) || root.querySelector(".clarify-card.pending");
+  if(!card) return;
+
+  const qText = card.querySelector(".clarify-q")?.textContent || "Clarifying Question";
+  card.className = "clarify-card settled";
+  card.replaceChildren();
+
+  const hdr = document.createElement("div");
+  hdr.className = "clarify-hdr";
+  const qEl = document.createElement("div");
+  qEl.className = "clarify-q";
+  qEl.textContent = qText;
+  hdr.appendChild(qEl);
+  card.appendChild(hdr);
+
+  const ansRow = document.createElement("div");
+  ansRow.className = "clarify-answer";
+  
+  let formatted = answerText;
+  if(formatted && typeof formatted === "string" && (formatted.startsWith("[") || formatted.startsWith("{"))){
+    try{
+      let parsed = JSON.parse(formatted);
+      if(parsed && typeof parsed === "object" && parsed.answers && typeof parsed.answers === "object"){
+        parsed = parsed.answers;
+      }
+      if(Array.isArray(parsed)) formatted = parsed.join(", ");
+      else if(typeof parsed === "object") formatted = Object.entries(parsed).map(([k,v])=>`${k}: ${v}`).join("; ");
+    }catch{}
+  }
+
+  if(formatted && String(formatted).trim()){
+    ansRow.innerHTML = `<span class="clarify-ans-badge">Answer</span> <span>${stripRecommended(String(formatted).trim())}</span>`;
+  } else {
+    ansRow.innerHTML = `<span class="clarify-ans-skipped">Skipped (agent decided)</span>`;
+  }
+  card.appendChild(ansRow);
+}
+
+// Scoped keyboard hotkey listener for clarify
+window.addEventListener("keydown", (e)=>{
+  if(e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;
+  const activeEl = document.activeElement;
+  if(activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA" || activeEl.isContentEditable)) return;
+  const activeCard = document.querySelector(".clarify-card.pending");
+  if(!activeCard) return;
+
+  const choices = activeCard.querySelectorAll(".clarify-choice-btn");
+  if(!choices.length) return;
+
+  if(/^[1-9]$/.test(e.key)){
+    const idx = Number(e.key) - 1;
+    if(idx < choices.length){
+      e.preventDefault();
+      choices[idx].click();
+    }
+    return;
+  }
+  const k = e.key.toLowerCase();
+  if(k.length === 1 && k >= 'a' && k <= 'z'){
+    const idx = k.charCodeAt(0) - 97;
+    if(idx < choices.length){
+      e.preventDefault();
+      choices[idx].click();
+    }
+    return;
+  }
+  if(e.key === "Enter"){
+    const subBtn = activeCard.querySelector(".clarify-submit-btn");
+    if(subBtn && !subBtn.disabled){
+      e.preventDefault();
+      subBtn.click();
+    }
+  }
+});
+
+// Mobile Reconnection / Active Focus Probe
+async function probePendingClarify(){
+  if(!activeId || streaming) return;
+  try{
+    const r = await api("/api/sessions/" + encodeURIComponent(activeId) + "/clarify/pending");
+    if(r.ok){
+      const data = await r.json();
+      if(data.pending && data.clarify){
+        const existing = document.querySelector(`.clarify-card[data-cid="${data.clarify.clarify_id}"]`);
+        if(!existing){
+          const bubble = document.querySelector('.msg.assistant:last-of-type') || document.getElementById("thread");
+          renderClarifyCard(data.clarify, bubble);
+        }
+      }
+    }
+  }catch{}
+}
+/* ---------- model & provider selection ---------- */
+const MODEL_CACHE_KEY = "hermes-uplink-model-options";
+let modelOptions = null;
+let currentSessionModel = null;
+let currentSessionProvider = null;
+
+function loadCachedModelOptions(){
+  try{
+    const raw = localStorage.getItem(MODEL_CACHE_KEY);
+    if(raw){
+      modelOptions = JSON.parse(raw);
+    }
+  }catch(e){}
+}
+
+async function fetchModelOptions(force = false){
+  try{
+    const chip = document.getElementById("modelChip");
+    if(!modelOptions && chip) chip.classList.add("loading");
+    const r = await api("/api/model/options");
+    if(chip) chip.classList.remove("loading");
+    if(!r.ok) return;
+    const data = await r.json();
+    if(data && typeof data === "object"){
+      modelOptions = data;
+      try{ localStorage.setItem(MODEL_CACHE_KEY, JSON.stringify(data)); }catch(e){}
+      updateModelChip(currentSessionModel, currentSessionProvider);
+      const modal = document.getElementById("modelModal");
+      if(modal && !modal.classList.contains("hidden")){
+        const searchVal = document.getElementById("modelSearchInput").value || "";
+        renderModelList(searchVal);
+      }
+    }
+  }catch(e){
+    const chip = document.getElementById("modelChip");
+    if(chip) chip.classList.remove("loading");
+  }
+}
+
+function formatModelName(modelStr){
+  if(!modelStr) return "";
+  const parts = String(modelStr).split("/");
+  return parts[parts.length - 1];
+}
+
+function updateModelChip(modelName, providerName){
+  const chip = document.getElementById("modelChip");
+  const textEl = document.getElementById("modelChipText");
+  if(!chip || !textEl) return;
+  const activeModel = modelName || cfg.defaultModel || (modelOptions && modelOptions.model);
+  const activeProv = providerName || cfg.defaultProvider || (modelOptions && modelOptions.provider);
+  if(activeModel){
+    textEl.textContent = formatModelName(activeModel);
+    chip.title = "Active Model: " + activeModel + (activeProv ? " (" + activeProv + ")" : "") + (modelName ? "" : " [Default]") + "\nClick to switch";
+  } else {
+    textEl.textContent = "Model";
+    chip.title = "Select Model / Provider";
+  }
+}
+
+function openModelModal(){
+  const modal = document.getElementById("modelModal");
+  if(!modal) return;
+  document.getElementById("modelDiag").textContent = "";
+  const search = document.getElementById("modelSearchInput");
+  search.value = "";
+  document.getElementById("modelSetDefault").checked = Boolean(cfg.defaultModel);
+  document.getElementById("modelCustomWrap").classList.add("hidden");
+  modal.classList.remove("hidden");
+  search.focus();
+  renderModelList("");
+  fetchModelOptions(true);
+}
+
+function closeModelModal(){
+  const modal = document.getElementById("modelModal");
+  if(modal) modal.classList.add("hidden");
+}
+
+function renderModelList(filterText = ""){
+  const container = document.getElementById("modelListContainer");
+  if(!container) return;
+  container.replaceChildren();
+
+  const q = String(filterText || "").trim().toLowerCase();
+  const currentActive = currentSessionModel || cfg.defaultModel || (modelOptions && modelOptions.model) || "";
+
+  let exactMatchFound = false;
+  const providers = (modelOptions && Array.isArray(modelOptions.providers)) ? modelOptions.providers : [];
+
+  if(q){
+    for(const p of providers){
+      for(const m of (p.models || [])){
+        if(String(m).toLowerCase() === q || String(m).toLowerCase().endsWith("/" + q)){
+          exactMatchFound = true;
+          break;
+        }
+      }
+      if(exactMatchFound) break;
+    }
+  }
+
+  if(q && !exactMatchFound){
+    const customCard = document.createElement("div");
+    customCard.className = "model-custom-item";
+    const left = document.createElement("span");
+    left.textContent = "⚡ Use custom model: \"" + filterText + "\"";
+    const right = document.createElement("span");
+    right.className = "model-custom-action";
+    right.textContent = "Select →";
+    customCard.append(left, right);
+    customCard.onclick = ()=>{
+      const isSetDef = document.getElementById("modelSetDefault").checked;
+      applyModel(filterText.trim(), "", isSetDef);
+    };
+    container.appendChild(customCard);
+  }
+
+  if(!providers.length){
+    if(!q){
+      container.appendChild(messageElement("Loading or no providers reported. Use manual custom model below."));
+    }
+    return;
+  }
+
+  let totalRendered = 0;
+
+  for(const p of providers){
+    const pName = String(p.name || p.slug || "Provider");
+    const pSlug = String(p.slug || "");
+    const allModels = Array.isArray(p.models) ? p.models : [];
+    
+    const matchedModels = allModels.filter(m => {
+      if(!q) return true;
+      const mStr = String(m).toLowerCase();
+      return mStr.includes(q) || pName.toLowerCase().includes(q) || pSlug.toLowerCase().includes(q);
+    });
+
+    if(!matchedModels.length) continue;
+    totalRendered += matchedModels.length;
+
+    const group = document.createElement("div");
+    group.className = "model-provider-group";
+
+    const hdr = document.createElement("div");
+    hdr.className = "model-provider-hdr";
+    const hdrTitle = document.createElement("span");
+    hdrTitle.textContent = pName;
+    const hdrBadge = document.createElement("span");
+    hdrBadge.className = "model-provider-badge";
+    hdrBadge.textContent = matchedModels.length + " models";
+    hdr.append(hdrTitle, hdrBadge);
+
+    const itemsContainer = document.createElement("div");
+    itemsContainer.className = "model-items";
+
+    hdr.onclick = ()=>{
+      group.classList.toggle("collapsed");
+    };
+
+    for(const m of matchedModels){
+      const mStr = String(m);
+      const item = document.createElement("div");
+      const isItemActive = Boolean(currentActive && (currentActive === mStr || currentActive === pSlug + "/" + mStr));
+      item.className = "model-item" + (isItemActive ? " active" : "");
+
+      const nameEl = document.createElement("span");
+      nameEl.className = "model-item-name";
+      nameEl.textContent = mStr;
+
+      const metaEl = document.createElement("div");
+      metaEl.className = "model-item-meta";
+
+      const pricing = p.pricing && p.pricing[mStr];
+      if(pricing){
+        const priceBadge = document.createElement("span");
+        if(pricing.free || mStr.endsWith(":free")){
+          priceBadge.className = "model-price-badge free";
+          priceBadge.textContent = "free";
+        } else if(pricing.input && pricing.output){
+          priceBadge.className = "model-price-badge";
+          priceBadge.textContent = pricing.input + "/" + pricing.output;
+        }
+        if(priceBadge.textContent) metaEl.appendChild(priceBadge);
+      } else if(mStr.endsWith(":free")){
+        const priceBadge = document.createElement("span");
+        priceBadge.className = "model-price-badge free";
+        priceBadge.textContent = "free";
+        metaEl.appendChild(priceBadge);
+      }
+
+      if(isItemActive){
+        const check = document.createElement("span");
+        check.className = "model-active-check";
+        check.textContent = "✓";
+        metaEl.appendChild(check);
+      }
+
+      item.append(nameEl, metaEl);
+      item.onclick = ()=>{
+        const isSetDef = document.getElementById("modelSetDefault").checked;
+        applyModel(mStr, pSlug, isSetDef);
+      };
+      itemsContainer.appendChild(item);
+    }
+
+    group.append(hdr, itemsContainer);
+    container.appendChild(group);
+  }
+
+  if(totalRendered === 0 && !exactMatchFound){
+    container.appendChild(messageElement("No matching models found."));
+  }
+}
+
+async function applyModel(model, provider, setDefault = false){
+  const diag = document.getElementById("modelDiag");
+  if(diag) diag.textContent = "Applying model…";
+  try{
+    if(activeId){
+      const res = await api("/api/sessions/" + encodeURIComponent(activeId) + "/model", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({model: model, provider: provider || ""})
+      });
+      if(!res.ok){
+        const err = await res.json().catch(()=>({}));
+        throw new Error(err.error?.message || "HTTP " + res.status);
+      }
+      currentSessionModel = model;
+      currentSessionProvider = provider || null;
+    }
+    if(setDefault || !activeId){
+      cfg.defaultModel = model;
+      cfg.defaultProvider = provider || "";
+      saveCfg();
+    }
+    updateModelChip(currentSessionModel || model, currentSessionProvider || provider);
+    closeModelModal();
+  }catch(e){
+    if(diag) diag.textContent = "Failed to switch model: " + (e.message || e);
+    else alert("Failed to switch model: " + (e.message || e));
+  }
+}
+
 /* ---------- boot ---------- */
 function boot(){
   probe();
@@ -437,6 +1200,9 @@ function boot(){
   updateRingState();
   loadSkills();
   loadTools();
+  loadCachedModelOptions();
+  fetchModelOptions();
+  updateModelChip(currentSessionModel, currentSessionProvider);
 }
 
 /* ---------- manual / on-focus refresh ----------
@@ -461,10 +1227,14 @@ async function refresh(){
       const detailRes = await api("/api/sessions/"+encodeURIComponent(activeId));
       if(detailRes.ok){
         const detail = await detailRes.json();
-        const used = num(detail.context_used ?? detail.contextTokens);
-        const limit = num(detail.context_limit ?? detail.context_window ?? detail.contextWindow ?? detail.max_tokens);
-        const occ = (typeof detail.occupancy_pct === "number") ? detail.occupancy_pct : null;
+        const sessObj = detail.session || detail;
+        const used = num(sessObj.context_used ?? sessObj.contextTokens);
+        const limit = num(sessObj.context_limit ?? sessObj.context_window ?? sessObj.contextWindow ?? sessObj.max_tokens);
+        const occ = (typeof sessObj.occupancy_pct === "number") ? sessObj.occupancy_pct : null;
         if(limit > 0 && used > 0) { d.context_used = used; d.context_limit = limit; if(occ != null) d.occupancy_pct = occ; }
+        currentSessionModel = sessObj.model || null;
+        currentSessionProvider = sessObj.provider || null;
+        updateModelChip(currentSessionModel, currentSessionProvider);
       }
     }catch(e){}
 
@@ -478,8 +1248,8 @@ async function refresh(){
     refreshing = false;
   }
 }
-document.addEventListener("visibilitychange", ()=>{ if(!document.hidden) refresh(); });
-window.addEventListener("focus", ()=> refresh());
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden){ refresh(); probePendingClarify(); } });
+window.addEventListener("focus", ()=>{ refresh(); probePendingClarify(); });
 
 /* ---------- sessions ---------- */
 async function loadSessions(){
@@ -579,10 +1349,14 @@ async function openSession(id, title){
       const detailRes = await api("/api/sessions/"+encodeURIComponent(id));
       if(detailRes.ok){
         const detail = await detailRes.json();
-        const used = num(detail.context_used ?? detail.contextTokens);
-        const limit = num(detail.context_limit ?? detail.context_window ?? detail.contextWindow ?? detail.max_tokens);
-        const occ = (typeof detail.occupancy_pct === "number") ? detail.occupancy_pct : null;
+        const sessObj = detail.session || detail;
+        const used = num(sessObj.context_used ?? sessObj.contextTokens);
+        const limit = num(sessObj.context_limit ?? sessObj.context_window ?? sessObj.contextWindow ?? sessObj.max_tokens);
+        const occ = (typeof sessObj.occupancy_pct === "number") ? sessObj.occupancy_pct : null;
         if(limit > 0 && used > 0) { data.context_used = used; data.context_limit = limit; if(occ != null) data.occupancy_pct = occ; }
+        currentSessionModel = sessObj.model || null;
+        currentSessionProvider = sessObj.provider || null;
+        updateModelChip(currentSessionModel, currentSessionProvider);
       }
     }catch(e){}
 
@@ -597,11 +1371,23 @@ async function openSession(id, title){
 
 async function newSession(){
   try{
-    const r = await api("/api/sessions", {method:"POST", headers:{"Content-Type":"application/json"}, body:"{}"});
+    const payload = {};
+    if(cfg.defaultModel){
+      payload.model = cfg.defaultModel;
+      if(cfg.defaultProvider) payload.provider = cfg.defaultProvider;
+    }
+    const r = await api("/api/sessions", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify(payload)
+    });
     if(!r.ok) throw new Error("HTTP "+r.status);
     const s = await r.json();
     const id = s.id || (s.session&&s.session.id);
     if(!id) throw new Error("no id in response");
+    currentSessionModel = cfg.defaultModel || null;
+    currentSessionProvider = cfg.defaultProvider || null;
+    updateModelChip(currentSessionModel, currentSessionProvider);
     await loadSessions();
     await openSession(id, "New chat");
   }catch(e){ alert("New chat failed: "+e.message); }
@@ -616,18 +1402,38 @@ function maybeAutoscroll(){
   if(atBottom()){ const t = document.getElementById("thread"); t.scrollTop = t.scrollHeight; }
 }
 const renderTimers = new WeakMap();
-function scheduleRender(bubble){
-  if(renderTimers.has(bubble)) return;
+function getOrCreateActiveBody(bubble){
+  if(!bubble._curBody){
+    const b = document.createElement("div");
+    b.className = "body";
+    bubble.appendChild(b);
+    bubble._curBody = b;
+    bubble._curRaw = "";
+  }
+  return bubble._curBody;
+}
+function scheduleRenderBody(bodyEl, rawText){
+  if(renderTimers.has(bodyEl)) return;
   const id = setTimeout(()=>{
-    renderTimers.delete(bubble);
-    if(bubble._raw !== undefined) setBody(bubble.querySelector(".body"), bubble._raw);
+    renderTimers.delete(bodyEl);
+    const parsed = extractModelTags(rawText);
+    if(parsed.cleanText){
+      setBody(bodyEl, parsed.cleanText);
+    } else if(parsed.activeThought){
+      bodyEl.innerHTML = "<span class=\"tool-running\">Thinking…</span>";
+    }
   }, 80);
-  renderTimers.set(bubble, id);
+  renderTimers.set(bodyEl, id);
 }
 function flushRender(bubble){
-  const id = renderTimers.get(bubble);
-  if(id){ clearTimeout(id); renderTimers.delete(bubble); }
-  if(bubble._raw !== undefined) setBody(bubble.querySelector(".body"), bubble._raw);
+  if(bubble._curBody && bubble._curRaw !== undefined){
+    const id = renderTimers.get(bubble._curBody);
+    if(id){ clearTimeout(id); renderTimers.delete(bubble._curBody); }
+    const parsed = extractModelTags(bubble._curRaw);
+    if(parsed.cleanText){
+      setBody(bubble._curBody, parsed.cleanText);
+    }
+  }
 }
 
 async function streamTurn(text, sessionId, opts={}){
@@ -635,15 +1441,18 @@ async function streamTurn(text, sessionId, opts={}){
   const addUser = opts.addUser !== false;
   const title = document.getElementById("activeTitle").textContent;
   if(addUser) addMsg("user", text);
+  const abortCtrl = new AbortController();
+  currentAbort = abortCtrl;
   streaming = true; streamingSessionId = sessionId; updateRingState();
   const bubble = addMsg("assistant", "");
   bubble.dataset.sid = sessionId;
-  currentAbort = new AbortController();
+  bubble._curBody = null;
+  bubble._curRaw = "";
   try{
     const r = await api("/api/sessions/"+encodeURIComponent(sessionId)+"/chat/stream", {
       method:"POST", headers:{"Content-Type":"application/json"},
       body: JSON.stringify({input:text}),
-      signal: currentAbort.signal
+      signal: abortCtrl.signal
     });
     if(!r.ok) throw new Error("HTTP "+r.status+" "+await r.text());
     const reader = r.body.getReader();
@@ -662,22 +1471,38 @@ async function streamTurn(text, sessionId, opts={}){
     }
     if(buf.trim()) handleFrame(buf, bubble);
   }catch(e){
-    const body = bubble.querySelector(".body");
+    const body = getOrCreateActiveBody(bubble);
     if(e && e.name === "AbortError") body.textContent += "\n[stopped]";
     else body.textContent += "\n[error] " + (e && e.message ? e.message : e);
   }finally{
-    streaming = false; streamingSessionId = null; currentAbort = null;
-    flushRender(bubble);
-    updateRingState();
-    if(activeId === sessionId) await openSession(sessionId, title);
+    if(currentAbort === abortCtrl){
+      streaming = false; streamingSessionId = null; currentAbort = null;
+      flushRender(bubble);
+      updateRingState();
+      if(activeId === sessionId) await openSession(sessionId, title);
+    }
   }
 }
 
 async function send(){
-  if(streaming) return;
   const ta = document.getElementById("input");
   const text = ta.value.trim();
   if(!text) return;
+  if(streaming && !activeClarifyId) return;
+  if(activeClarifyId){
+    const prevCid = activeClarifyId;
+    activeClarifyId = null;
+    try{
+      await api("/api/sessions/"+encodeURIComponent(activeId)+"/clarify/respond", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({clarify_id: prevCid, answer:""})
+      });
+    }catch(e){}
+    if(currentAbort){
+      try{ currentAbort.abort(); }catch(e){}
+    }
+    streaming = false;
+  }
   if(!activeId){ await newSession(); }
   if(!activeId) return;
   ta.value = "";
@@ -707,24 +1532,37 @@ function handleFrame(frame, bubble){
   let obj=null; try{ obj = JSON.parse(data) }catch{}
   if(event==="assistant.delta"){
     const t = obj && obj.text!=null ? obj.text : data;
-    if(!bubble._raw) bubble._raw = "";
-    bubble._raw += t;
-    scheduleRender(bubble);
+    const body = getOrCreateActiveBody(bubble);
+    bubble._curRaw = (bubble._curRaw || "") + t;
+    scheduleRenderBody(body, bubble._curRaw);
     maybeAutoscroll();
   }else if(event==="tool.started"){
+    if(bubble && bubble._curBody && bubble._curRaw){
+      flushRender(bubble);
+    }
+    if(bubble){
+      bubble._curBody = null;
+      bubble._curRaw = "";
+    }
     const name = (obj&&obj.name)||"tool";
-    addToolCard(name, obj&&obj.call_id, "run", "", bubble);
+    const input = (obj && (obj.parameters || obj.arguments || obj.input || obj.args)) || "";
+    addToolCard(name, obj&&obj.call_id, "run", input, "", bubble);
   }else if(event==="tool.completed"){
     const cid = obj&&obj.call_id; const out = obj&&obj.output!=null?obj.output:"";
     updateToolCard(cid, "done", typeof out==="string"?out:JSON.stringify(out,null,2), bubble);
   }else if(event==="tool.failed"){
-    const cid = obj&&obj.call_id; const out = obj&&obj.preview!=null?obj.preview:"";
+    const cid = obj&&obj.call_id; const out = obj&&obj.preview!=null?obj.preview:(obj&&obj.error!=null?obj.error:"");
     updateToolCard(cid, "failed", typeof out==="string"?out:JSON.stringify(out,null,2), bubble);
+  }else if(event==="clarify"){
+    if(obj) renderClarifyCard(obj, bubble);
   }else if(event==="run.completed"){
     /* server will re-sync history via openSession */
   }
   // fallback: if no structured events, but data is plain text
-  if(event==="message" && data && !obj){ bubble.querySelector(".body").textContent += data; }
+  if(event==="message" && data && !obj){
+    const body = getOrCreateActiveBody(bubble);
+    body.textContent += data;
+  }
 }
 
 /* ---------- user message actions (edit / restore / rerun) ---------- */
@@ -789,9 +1627,13 @@ function addMsg(role, text){
   const label = document.createElement("div");
   label.className = "role";
   label.textContent = safe === "user" ? "you" : safe;
-  const body = document.createElement("div");
-  body.className="body";
-  d.append(label, body); setBody(body, text);
+  d.appendChild(label);
+  if(text || safe !== "assistant"){
+    const body = document.createElement("div");
+    body.className="body";
+    setBody(body, text);
+    d.appendChild(body);
+  }
   if(safe === "user"){
     d.dataset.text = text;
     d.appendChild(buildMsgActions());
@@ -802,33 +1644,129 @@ function addMsg(role, text){
 function renderThread(msgs){
   const t = document.getElementById("thread");
   t.replaceChildren();
-  for(const m of msgs){
+
+  const toolResultsById = new Map();
+  const consumedToolIndices = new Set();
+  (msgs || []).forEach((m, idx)=>{
+    if(safeRole(m.role) === "tool"){
+      const cid = m.tool_call_id || m.call_id || m.id;
+      if(cid) toolResultsById.set(String(cid), {msg: m, idx: idx});
+    }
+  });
+
+  for(let i = 0; i < (msgs || []).length; i++){
+    const m = msgs[i];
     const role = safeRole(m.role);
-    const c = document.createElement(role === "tool" ? "details" : "div");
-    c.className = "msg "+role;
-    if(role==="tool"){
+
+    if(role === "tool"){
+      if(consumedToolIndices.has(i)) continue;
+      const c = document.createElement("details");
+      c.className = "msg tool";
       c.appendChild(toolHeader(m.tool_name || m.name || "tool", "done"));
-    }else{
+      const b = document.createElement("div");
+      b.className = "body";
+      renderToolBody(b, "", str(m.content));
+      c.appendChild(b);
+      c.appendChild(createCollapseBtn(c));
+      t.appendChild(c);
+      continue;
+    }
+
+    if(role === "user"){
+      const c = document.createElement("div");
+      c.className = "msg user";
       const label = document.createElement("div");
       label.className = "role";
-      label.textContent = role === "user" ? "you" : role;
-      c.appendChild(label);
-    }
-    const b=document.createElement("div");
-    b.className="body";
-    setBody(b, str(m.content));
-    c.appendChild(b);
-    if(role === "tool") c.appendChild(createCollapseBtn(c));
-    if(role === "user"){
+      label.textContent = "you";
+      const b = document.createElement("div");
+      b.className = "body";
       const text = str(m.content);
+      setBody(b, text);
+      c.append(label, b);
       c.dataset.text = text;
       c.appendChild(buildMsgActions());
+      t.appendChild(c);
+      continue;
     }
+
+    if(role === "assistant"){
+      const c = document.createElement("div");
+      c.className = "msg assistant";
+      const label = document.createElement("div");
+      label.className = "role";
+      label.textContent = "assistant";
+      c.appendChild(label);
+
+      const parsed = extractModelTags(str(m.content));
+
+      parsed.thoughts.forEach(th=>{
+        c.appendChild(createThoughtCard(th, false));
+      });
+
+      if(parsed.cleanText){
+        const b = document.createElement("div");
+        b.className = "body";
+        setBody(b, parsed.cleanText);
+        c.appendChild(b);
+      }
+
+      const toolCalls = Array.isArray(m.tool_calls) ? m.tool_calls : [];
+      toolCalls.forEach(tc=>{
+        const name = tc.function?.name || tc.name || "tool";
+        const input = tc.function?.arguments || tc.arguments || tc.parameters || tc.input || "";
+        const cid = tc.id || tc.call_id || "";
+        let out = "";
+        if(cid && toolResultsById.has(String(cid))){
+          const match = toolResultsById.get(String(cid));
+          consumedToolIndices.add(match.idx);
+          out = str(match.msg.content);
+        }
+        const toolEl = document.createElement("details");
+        toolEl.className = "msg tool";
+        toolEl.dataset.cid = cid;
+        toolEl.appendChild(toolHeader(name, "done"));
+        const b = document.createElement("div");
+        b.className = "body";
+        renderToolBody(b, input, out);
+        toolEl.appendChild(b);
+        toolEl.appendChild(createCollapseBtn(toolEl));
+        c.appendChild(toolEl);
+      });
+
+      parsed.toolCalls.forEach(tc=>{
+        const name = tc.name || "tool";
+        const input = tc.arguments || tc.parameters || tc.input || tc.raw || "";
+        const toolEl = document.createElement("details");
+        toolEl.className = "msg tool";
+        toolEl.appendChild(toolHeader(name, "done"));
+        const b = document.createElement("div");
+        b.className = "body";
+        renderToolBody(b, input, "");
+        toolEl.appendChild(b);
+        toolEl.appendChild(createCollapseBtn(toolEl));
+        c.appendChild(toolEl);
+      });
+
+      if(c.children.length > 1){
+        t.appendChild(c);
+      }
+      continue;
+    }
+
+    const c = document.createElement("div");
+    c.className = "msg " + role;
+    const label = document.createElement("div");
+    label.className = "role";
+    label.textContent = role;
+    const b = document.createElement("div");
+    b.className = "body";
+    setBody(b, str(m.content));
+    c.append(label, b);
     t.appendChild(c);
   }
   t.scrollTop = t.scrollHeight;
 }
-function addToolCard(name, cid, state, out, bubble){
+function addToolCard(name, cid, state, input, out, bubble){
   // Tool cards belong to the turn that produced them: append to that
   // bubble (staying inside its message flow), falling back to the thread
   // only when no bubble is known.
@@ -839,7 +1777,8 @@ function addToolCard(name, cid, state, out, bubble){
   c.appendChild(toolHeader(name, state));
   const b=document.createElement("div");
   b.className="body";
-  setBody(b, out);
+  c._toolInput = input || "";
+  renderToolBody(b, input, out);
   c.appendChild(b);
   c.appendChild(createCollapseBtn(c));
   t.appendChild(c); t.scrollTop=t.scrollHeight;
@@ -852,8 +1791,10 @@ function updateToolCard(cid, state, out, bubble){
     target = bubble.querySelector('.msg.tool:last-of-type');
   }
   if(target){
-    target.querySelector(".dot").className="dot "+state;
-    setBody(target.querySelector(".body"), out);
+    target.querySelector(".dot").className="dot "+(state==="done"?"done":state==="failed"?"failed":"run");
+    const body = target.querySelector(".body");
+    const input = target._toolInput || "";
+    renderToolBody(body, input, out);
     if(state === "done") target.open = false;
   }
 }
@@ -914,6 +1855,113 @@ function str(x){
     try{ return JSON.stringify(x,null,2); }catch{ return "[unrenderable value]"; }
   }
   return String(x);
+}
+function formatPayload(x){
+  if(x == null || x === "") return "";
+  if(typeof x === "object"){
+    try{ return JSON.stringify(x, null, 2); }catch{ return String(x); }
+  }
+  if(typeof x === "string"){
+    const trimmed = x.trim();
+    if((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))){
+      try{ return JSON.stringify(JSON.parse(trimmed), null, 2); }catch{}
+    }
+    return x;
+  }
+  return String(x);
+}
+function renderToolBody(bodyEl, input, output){
+  bodyEl.replaceChildren();
+  const inStr = formatPayload(input);
+  const outStr = formatPayload(output);
+
+  if(inStr){
+    const sec = document.createElement("div");
+    sec.className = "tool-sec";
+    const h = document.createElement("div");
+    h.className = "tool-sec-h";
+    h.textContent = "Parameters";
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    code.textContent = inStr;
+    pre.appendChild(code);
+    sec.append(h, pre);
+    bodyEl.appendChild(sec);
+  }
+
+  if(outStr){
+    const sec = document.createElement("div");
+    sec.className = "tool-sec";
+    const h = document.createElement("div");
+    h.className = "tool-sec-h";
+    h.textContent = "Result";
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    code.textContent = outStr;
+    pre.appendChild(code);
+    sec.append(h, pre);
+    bodyEl.appendChild(sec);
+  } else if(!inStr && !outStr){
+    const span = document.createElement("span");
+    span.className = "tool-running";
+    span.textContent = "Running…";
+    bodyEl.appendChild(span);
+  }
+}
+function createThoughtCard(thoughtText, open){
+  const card = document.createElement("details");
+  card.className = "msg thought";
+  if(open) card.open = true;
+  
+  const hdr = document.createElement("summary");
+  hdr.className = "hdr";
+  const dot = document.createElement("span");
+  dot.className = "dot done";
+  const label = document.createElement("span");
+  label.textContent = "Thought";
+  hdr.append(dot, label);
+  card.appendChild(hdr);
+
+  const b = document.createElement("div");
+  b.className = "body";
+  b.textContent = thoughtText;
+  card.appendChild(b);
+  card.appendChild(createCollapseBtn(card));
+  return card;
+}
+function extractModelTags(text){
+  if(!text) return {thoughts: [], toolCalls: [], activeThought: "", cleanText: ""};
+  let clean = String(text);
+  const thoughts = [];
+  const toolCalls = [];
+  let activeThought = "";
+
+  clean = clean.replace(/<(?:thought|reasoning)>([\s\S]*?)<\/(?:thought|reasoning)>/gi, (match, inner)=>{
+    if(inner.trim()) thoughts.push(inner.trim());
+    return "";
+  });
+
+  const openThoughtMatch = clean.match(/<(?:thought|reasoning)>([\s\S]*)$/i);
+  if(openThoughtMatch){
+    activeThought = openThoughtMatch[1].trim();
+    clean = clean.slice(0, openThoughtMatch.index);
+  }
+
+  clean = clean.replace(/<tool_call>([\s\S]*?)<\/tool_call>/gi, (match, inner)=>{
+    const trimmed = inner.trim();
+    if(trimmed){
+      try{ toolCalls.push(JSON.parse(trimmed)); }
+      catch{ toolCalls.push({raw: trimmed}); }
+    }
+    return "";
+  });
+
+  const openToolMatch = clean.match(/<tool_call>([\s\S]*)$/i);
+  if(openToolMatch){
+    clean = clean.slice(0, openToolMatch.index);
+  }
+
+  return {thoughts, toolCalls, activeThought, cleanText: clean.trim()};
 }
 function escapeHtml(value){
   return String(value==null?"" : value).replace(/[&<>\"']/g, char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
@@ -1044,7 +2092,8 @@ function secureHtml(html){
   });
 }
 function setBody(el, text){
-  const safeText = String(text).replace(/<(?=[a-zA-Z\/!\?])/gi, "&lt;");
+  const parsed = extractModelTags(text);
+  const safeText = String(parsed.cleanText).replace(/<(?=[a-zA-Z\/!\?])/gi, "&lt;");
   el.innerHTML = secureHtml(renderMarkdown(safeText));
 }
 
@@ -1093,6 +2142,45 @@ document.getElementById("cfgCancel").onclick = ()=> document.getElementById("set
 document.getElementById("cfgSave").onclick = ()=>{ cfg.url=document.getElementById("cfgUrl").value.trim(); cfg.key=document.getElementById("cfgKey").value.trim(); saveCfg(); document.getElementById("settingsModal").classList.add("hidden"); loadSessions(); };
 document.getElementById("diagBtn").onclick = runDiag;
 document.getElementById("logoutBtn").onclick = logout;
+document.getElementById("modelChip").onclick = openModelModal;
+document.getElementById("modelModalClose").onclick = closeModelModal;
+document.getElementById("modelSearchInput").addEventListener("input", (e)=> renderModelList(e.target.value));
+document.getElementById("modelSearchInput").addEventListener("keydown", (e)=>{
+  if(e.key === "Escape"){
+    closeModelModal();
+  } else if(e.key === "Enter"){
+    const q = e.target.value.trim();
+    if(!q) return;
+    const firstCustom = document.querySelector(".model-custom-item");
+    const firstItem = document.querySelector(".model-item");
+    if(firstCustom){
+      firstCustom.click();
+    } else if(firstItem){
+      firstItem.click();
+    }
+  }
+});
+document.getElementById("modelCustomToggle").onclick = ()=>{
+  const wrap = document.getElementById("modelCustomWrap");
+  wrap.classList.toggle("hidden");
+  if(!wrap.classList.contains("hidden")){
+    document.getElementById("customModelInput").focus();
+  }
+};
+document.getElementById("customModelInput").addEventListener("keydown", e=>{ if(e.key === "Enter") document.getElementById("customModelApplyBtn").click(); });
+document.getElementById("customProviderInput").addEventListener("keydown", e=>{ if(e.key === "Enter") document.getElementById("customModelApplyBtn").click(); });
+document.getElementById("modelModal").addEventListener("click", e=>{ if(e.target === e.currentTarget) closeModelModal(); });
+document.getElementById("settingsModal").addEventListener("click", e=>{ if(e.target === e.currentTarget) document.getElementById("settingsModal").classList.add("hidden"); });
+document.getElementById("customModelApplyBtn").onclick = ()=>{
+  const prov = document.getElementById("customProviderInput").value.trim();
+  const mod = document.getElementById("customModelInput").value.trim();
+  if(!mod){
+    document.getElementById("modelDiag").textContent = "Please enter a model name.";
+    return;
+  }
+  const isSetDef = document.getElementById("modelSetDefault").checked;
+  applyModel(mod, prov, isSetDef);
+};
 
 /* message-action delegation (desktop hover buttons + mobile layout) */
 document.getElementById("thread").addEventListener("click", e=>{
