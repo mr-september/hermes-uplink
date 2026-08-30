@@ -2,6 +2,7 @@
 .uplink-key.txt
 .uplink-pass.txt
 .uplink.pid
+.verify_cookie.txt
 
 # Python
 __pycache__/
