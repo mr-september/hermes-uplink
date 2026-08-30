@@ -424,6 +424,33 @@ def is_local_proxy_healthy(port: int, timeout: float = 2.0) -> bool:
     return client_status == 200 and LOCAL_PROXY_SERVER.lower() in server.lower() and auth_status == 401
 
 
+def is_upstream_healthy(
+    upstream_url: str | None = None,
+    timeout: float = 2.0,
+) -> bool:
+    """Probe upstream Hermes Gateway health endpoint directly on loopback."""
+    target_url = upstream_url or os.environ.get("HERMES_UPSTREAM", "http://127.0.0.1:8642")
+    try:
+        parsed = urlsplit(target_url)
+        host = parsed.hostname or LOCAL_TARGET_HOST
+        port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+        connection = (
+            http.client.HTTPSConnection(host, port, timeout=timeout)
+            if parsed.scheme.lower() == "https"
+            else http.client.HTTPConnection(host, port, timeout=timeout)
+        )
+        try:
+            path = (parsed.path.rstrip("/") + "/health") if parsed.path else "/health"
+            connection.request("GET", path)
+            response = connection.getresponse()
+            response.read()
+            return response.status == 200
+        finally:
+            connection.close()
+    except (OSError, ValueError):
+        return False
+
+
 def ensure_local_proxy(
     port: int,
     root: Path = ROOT,
@@ -579,6 +606,12 @@ def start_access(port: int, root: Path = ROOT) -> int:
 
 
 def show_status(port: int) -> int:
+    proxy_ok = is_local_proxy_healthy(port)
+    upstream_target = os.environ.get("HERMES_UPSTREAM", "http://127.0.0.1:8642")
+    upstream_ok = is_upstream_healthy(upstream_target)
+    print(f"Local proxy (127.0.0.1:{port}): {'RUNNING' if proxy_ok else 'NOT RUNNING'}")
+    print(f"Hermes gateway ({upstream_target}): {'REACHABLE' if upstream_ok else 'OFFLINE / UNREACHABLE'}")
+
     client = build_client()
     try:
         status = client.status()

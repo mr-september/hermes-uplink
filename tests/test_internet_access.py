@@ -1,7 +1,9 @@
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -275,6 +277,32 @@ class InternetAccessTests(unittest.TestCase):
             with patch.object(internet_access, "show_status", return_value=0) as status:
                 self.assertEqual(internet_access._menu(8787), 0)
         status.assert_called_once_with(8787)
+
+    def test_is_upstream_healthy_active_and_inactive(self):
+        class HealthHandler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path == "/health":
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"status":"ok"}')
+                else:
+                    self.send_response(404)
+                    self.end_headers()
+
+            def log_message(self, *_args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), HealthHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            active_url = f"http://127.0.0.1:{server.server_port}"
+            self.assertTrue(internet_access.is_upstream_healthy(active_url))
+            self.assertFalse(internet_access.is_upstream_healthy("http://127.0.0.1:1"))
+        finally:
+            server.shutdown()
+            server.server_close()
 
 
 if __name__ == "__main__":

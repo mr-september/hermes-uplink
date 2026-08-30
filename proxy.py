@@ -12,8 +12,10 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import secrets
 import socket
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -47,8 +49,9 @@ PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 
 # These digests are deliberately pinned. The proxy must not automatically
 # authorize whatever JavaScript/HTML happens to be present on disk at startup.
-# Update the values as part of the same reviewed change as the corresponding
-# static asset; startup then fails closed if the deployed files drift.
+# Update the values via `python proxy.py --update-hashes` as part of the same
+# reviewed change as the corresponding static asset; startup then fails closed
+# if the deployed files drift.
 PINNED_ASSET_HASHES = {
     "index.html": "FO1ZLyiFYbh7WweEL1t0XywkqtTx4WvLr3CCimMzvNM=",
     "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
@@ -80,6 +83,97 @@ def _sha256_base64(relative_path):
     return base64.b64encode(digest.digest()).decode("ascii")
 
 
+def compute_current_hashes():
+    """Calculate the actual runtime SHA-256 digests for all static assets and inline tags."""
+    asset_hashes = {
+        rel_path: _sha256_base64(rel_path) for rel_path in PINNED_ASSET_HASHES
+    }
+
+    html_path = os.path.join(HERE, "index.html")
+    try:
+        with open(html_path, "r", encoding="utf-8", newline=None) as stream:
+            html_content = stream.read()
+    except OSError as error:
+        raise RuntimeError(f"could not read index.html: {error}") from error
+
+    # Extract inline script (excluding external src scripts)
+    script_match = re.search(r"<script(?![^>]*\bsrc\b)[^>]*>([\s\S]*?)</script>", html_content, re.IGNORECASE)
+    if not script_match:
+        raise RuntimeError("could not locate inline <script> tag in index.html")
+    script_text = script_match.group(1).replace("\r\n", "\n").replace("\r", "\n")
+    script_hash = base64.b64encode(hashlib.sha256(script_text.encode("utf-8")).digest()).decode("ascii")
+
+    # Extract inline style
+    style_match = re.search(r"<style[^>]*>([\s\S]*?)</style>", html_content, re.IGNORECASE)
+    if not style_match:
+        raise RuntimeError("could not locate inline <style> tag in index.html")
+    style_text = style_match.group(1).replace("\r\n", "\n").replace("\r", "\n")
+    style_hash = base64.b64encode(hashlib.sha256(style_text.encode("utf-8")).digest()).decode("ascii")
+
+    return {
+        "assets": asset_hashes,
+        "script": script_hash,
+        "style": style_hash,
+    }
+
+
+def check_pinned_hashes():
+    """Compare pinned hashes against current file hashes.
+
+    Returns (is_match, current_hashes, mismatches_list).
+    """
+    current = compute_current_hashes()
+    mismatches = []
+    for rel_path, expected in PINNED_ASSET_HASHES.items():
+        actual = current["assets"].get(rel_path)
+        if actual != expected:
+            mismatches.append((rel_path, expected, actual))
+    if current["script"] != INLINE_SCRIPT_HASH:
+        mismatches.append(("inline <script>", INLINE_SCRIPT_HASH, current["script"]))
+    if current["style"] != INLINE_STYLE_HASH:
+        mismatches.append(("inline <style>", INLINE_STYLE_HASH, current["style"]))
+    return (len(mismatches) == 0), current, mismatches
+
+
+def update_pinned_hashes():
+    """Recalculate hashes and rewrite proxy.py in place with updated constants."""
+    current = compute_current_hashes()
+    proxy_path = os.path.realpath(__file__)
+    with open(proxy_path, "r", encoding="utf-8") as stream:
+        content = stream.read()
+
+    # Format PINNED_ASSET_HASHES dictionary representation
+    lines = ["PINNED_ASSET_HASHES = {"]
+    for rel_path, digest in current["assets"].items():
+        lines.append(f'    "{rel_path}": "{digest}",')
+    lines.append("}")
+    formatted_assets = "\n".join(lines)
+
+    content = re.sub(
+        r"PINNED_ASSET_HASHES\s*=\s*\{[\s\S]*?\}",
+        formatted_assets,
+        content,
+        count=1,
+    )
+    content = re.sub(
+        r'INLINE_SCRIPT_HASH\s*=\s*"[^"]*"',
+        f'INLINE_SCRIPT_HASH = "{current["script"]}"',
+        content,
+        count=1,
+    )
+    content = re.sub(
+        r'INLINE_STYLE_HASH\s*=\s*"[^"]*"',
+        f'INLINE_STYLE_HASH = "{current["style"]}"',
+        content,
+        count=1,
+    )
+
+    with open(proxy_path, "w", encoding="utf-8", newline="\n") as stream:
+        stream.write(content)
+
+    return current
+
+
 def _validate_pinned_asset(relative_path, expected_hash):
     actual_hash = _sha256_base64(relative_path)
     if actual_hash != expected_hash:
@@ -94,7 +188,8 @@ def _validate_pinned_assets():
         _validate_pinned_asset(relative_path, expected_hash)
 
 
-_validate_pinned_assets()
+if not any(arg in sys.argv for arg in ("--update-hashes", "--check-hashes", "--help", "-h")):
+    _validate_pinned_assets()
 
 CONTENT_SECURITY_POLICY = (
     "default-src 'none'; "
@@ -466,7 +561,8 @@ class Handler(BaseHTTPRequestHandler):
             if body is READ_ERROR:
                 return
             url = UPSTREAM + path
-            request = urllib.request.Request(url, data=body or None, method=method)
+            data = body if body else (b"" if method in ("POST", "PUT", "PATCH") else None)
+            request = urllib.request.Request(url, data=data, method=method)
             for name in ("Content-Type", "Accept", "Last-Event-ID"):
                 value = self.headers.get(name)
                 if value:
@@ -564,6 +660,16 @@ def _remove_pid():
 def main():
     global UPSTREAM, PROXY_PORT, API_KEY, PASS
     parser = argparse.ArgumentParser(description="Hermes Uplink local proxy")
+    parser.add_argument(
+        "--update-hashes",
+        action="store_true",
+        help="recalculate static asset SHA-256 digests and update proxy.py constants in place",
+    )
+    parser.add_argument(
+        "--check-hashes",
+        action="store_true",
+        help="verify whether pinned asset hashes match current files without starting server",
+    )
     parser.add_argument("--upstream", default=os.environ.get("HERMES_UPSTREAM", UPSTREAM))
     port_value = os.environ.get("HERMES_PORT", str(PROXY_PORT))
     try:
@@ -578,6 +684,28 @@ def main():
         help="allow an HTTPS upstream outside loopback; use only with an explicitly trusted server",
     )
     args = parser.parse_args()
+
+    if args.update_hashes:
+        updated = update_pinned_hashes()
+        print("[+] Pinned asset hashes updated in proxy.py:")
+        for path, digest in updated["assets"].items():
+            print(f"    {path}: {digest}")
+        print(f"    inline <script>: {updated['script']}")
+        print(f"    inline <style>: {updated['style']}")
+        return
+
+    if args.check_hashes:
+        is_match, current, mismatches = check_pinned_hashes()
+        if is_match:
+            print("[+] All pinned asset and inline CSP digests match current files.")
+            sys.exit(0)
+        else:
+            print("[!] Pinned asset hash drift detected:")
+            for item, exp, act in mismatches:
+                print(f"    {item}:")
+                print(f"      expected: {exp}")
+                print(f"      actual:   {act}")
+            sys.exit(1)
     if not is_loopback_host(args.host):
         parser.error("the proxy only supports loopback binds; use an HTTPS tunnel for remote access")
     if not 1 <= args.port <= 65535:
