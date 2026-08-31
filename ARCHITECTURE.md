@@ -17,9 +17,9 @@ Hermes Uplink is a data-efficient, zero-build "thin client" and secure reverse-p
 │ with vendored dependencies;   │ 127.0.0.1; LLM API keys never │ by Tailscale Funnel. No tunnel        │
 │ no npm, webpack, or node.js.  │ reach the client browser.     │ binaries or credentials in repo.      │
 ├───────────────────────────────┼───────────────────────────────┼───────────────────────────────────────┤
-│ 4. Single Source of Truth     │ 5. Pinned Integrity Guard     │ 6. Battery-Conscious Sync             │
-│ Shares `%LOCALAPPDATA%\hermes\`│ Static assets are SHA-256     │ Uses on-focus/visibility convergence  │
-│ sessions with CLI, TUI, cron. │ hash-verified at proxy boot.  │ rather than aggressive poll loops.    │
+│ 4. Single Source of Truth     │ 5. Pinned Integrity Guard     │ 6. Battery & Network Resilience       │
+│ Shares `%LOCALAPPDATA%\hermes\`│ Static assets are SHA-256     │ Focus-based sync, last-render cache,  │
+│ sessions with CLI, TUI, cron. │ hash-verified at proxy boot.  │ draft autosave & online/offline sync. │
 └───────────────────────────────┴───────────────────────────────┴───────────────────────────────────────┘
 ```
 
@@ -103,14 +103,14 @@ The codebase is intentionally lean and modular, relying strictly on standard lib
 ```mermaid
 graph TD
     subgraph FRONTEND["Edge / Client-Side Presentation Layer"]
-        INDEX_HTML["<b>index.html</b><br/>• Reactive 3-pane responsive layout<br/>• SSE stream decoder & thread render<br/>• Clarify interactive question cards<br/>• Model & Provider selector modal<br/>• Battery-friendly focus refresh<br/>• Context occupancy ring"]
+        INDEX_HTML["<b>index.html</b><br/>• Reactive 3-pane responsive layout<br/>• SSE stream decoder & non-destructive render<br/>• Turn idempotency (UUID / Idempotency-Key)<br/>• Clarify interactive question cards<br/>• Model & Provider selector modal<br/>• Composer draft autosave (localStorage)<br/>• Online/offline banner & auto-recovery<br/>• Battery-friendly focus refresh"]
         VENDOR_MARKED["<b>vendor/marked.umd.js</b><br/>• Pinned offline Markdown parser (v17)"]
         SW_JS["<b>sw.js</b><br/>• PWA service worker shell caching<br/>• Dynamic asset bypass"]
         MANIFEST["<b>manifest.webmanifest</b><br/>• Mobile PWA metadata & icons"]
     end
 
     subgraph PROXY_LAYER["Reverse Proxy & Gateway Security Layer"]
-        PROXY_PY["<b>proxy.py</b><br/>• UplinkServer (ThreadingHTTPServer)<br/>• Handler (BaseHTTPRequestHandler)<br/>• Session Gate & Rate Limiting (AUTH_ATTEMPTS)<br/>• SHA-256 Pinned Asset Validator<br/>• HTTP Header & Body Sanitizer<br/>• SSE Connection Delimiting"]
+        PROXY_PY["<b>proxy.py</b><br/>• UplinkServer (ThreadingHTTPServer)<br/>• Handler (BaseHTTPRequestHandler)<br/>• Session Gate & Rate Limiting (AUTH_ATTEMPTS)<br/>• SHA-256 Pinned Asset Validator<br/>• Forward Idempotency-Key & X-Client-Turn-ID<br/>• HTTP Header & Body Sanitizer<br/>• SSE Connection Delimiting"]
         CONSOLE_UTILS["<b>console_utils.py</b><br/>• Win32 Console QuickEdit Enabler"]
     end
 
@@ -168,26 +168,32 @@ sequenceDiagram
 
     User->>Client: Open URL (https://node.tailnet.ts.net/)
     Client->>Proxy: GET /api/sessions?limit=1 (Initial Probe)
-    Proxy-->>Client: 401 Unauthorized (Missing/invalid session cookie)
-    Client->>Client: Display Passphrase Modal (#authModal)
-    User->>Client: Types Passphrase & hits Connect
-    Client->>Proxy: POST /__auth {"passphrase": "..."}
-    
-    alt Passphrase Incorrect
-        Proxy->>Proxy: Increment AUTH_ATTEMPTS (Rate limit: 10/60s)
-        Proxy-->>Client: 401 Unauthorized or 429 Too Many Requests
-        Client->>User: Display error message on modal
-    else Passphrase Correct
-        Proxy->>Proxy: Clear failure records & generate secrets.token_urlsafe(32)
-        Proxy->>Proxy: Store in SESSIONS[token] = now + 12h TTL
-        Proxy-->>Client: 204 No Content<br/>Set-Cookie: hermes_uplink_session=...; HttpOnly; SameSite=Strict; Path=/
-        Client->>Client: Hide Modal, invoke boot()
-        Client->>Proxy: GET /api/sessions (Cookie attached)
-        Proxy->>Proxy: Validate token in SESSIONS map
-        Proxy->>Upstream: GET /api/sessions (Add Header "Authorization: Bearer <KEY>")
-        Upstream-->>Proxy: 200 OK [{"id": "s1", ...}]
-        Proxy-->>Client: 200 OK [{"id": "s1", ...}]
-        Client->>User: Render session sidebar & active chat
+
+    alt Network Transport Failure (Offline / Connection Drop)
+        Client->>Client: Display Top Banner (#offlineBanner) & scheduleProbe()
+        Note over Client: Does NOT show Passphrase Modal (#authModal)
+    else 401 Unauthorized (Missing/invalid session cookie)
+        Proxy-->>Client: 401 Unauthorized
+        Client->>Client: Display Passphrase Modal (#authModal)
+        User->>Client: Types Passphrase & hits Connect
+        Client->>Proxy: POST /__auth {"passphrase": "..."}
+        
+        alt Passphrase Incorrect
+            Proxy->>Proxy: Increment AUTH_ATTEMPTS (Rate limit: 10/60s)
+            Proxy-->>Client: 401 Unauthorized or 429 Too Many Requests
+            Client->>User: Display error message on modal
+        else Passphrase Correct
+            Proxy->>Proxy: Clear failure records & generate secrets.token_urlsafe(32)
+            Proxy->>Proxy: Store in SESSIONS[token] = now + 12h TTL
+            Proxy-->>Client: 204 No Content<br/>Set-Cookie: hermes_uplink_session=...; HttpOnly; SameSite=Strict; Path=/
+            Client->>Client: Hide Modal, invoke boot()
+            Client->>Proxy: GET /api/sessions (Cookie attached)
+            Proxy->>Proxy: Validate token in SESSIONS map
+            Proxy->>Upstream: GET /api/sessions (Add Header "Authorization: Bearer <KEY>")
+            Upstream-->>Proxy: 200 OK [{"id": "s1", ...}]
+            Proxy-->>Client: 200 OK [{"id": "s1", ...}]
+            Client->>User: Render session sidebar & active chat
+        end
     end
 ```
 
@@ -208,10 +214,12 @@ sequenceDiagram
 
     User->>UI: Types prompt & clicks Send (or Enter)
     UI->>UI: Append User message bubble to thread
+    UI->>UI: Clear draft in localStorage (hermes-uplink-draft-*)
+    UI->>UI: Generate turnId = crypto.randomUUID()
     UI->>UI: Set streaming = true, update Ring to Stop (■)
-    UI->>Proxy: POST /api/sessions/{id}/chat/stream {"message": "..."}
+    UI->>Proxy: POST /api/sessions/{id}/chat/stream<br/>Header: Idempotency-Key: <turnId><br/>Header: X-Client-Turn-ID: <turnId><br/>Body: {"input": "...", "client_turn_id": "<turnId>"}
     Proxy->>Proxy: Validate session cookie & acquire PROXY_SEMAPHORE (max 32)
-    Proxy->>API: POST /api/sessions/{id}/chat/stream (Injected Bearer Key)
+    Proxy->>API: Forward POST with Injected Bearer Key & Idempotency Headers
     API->>Worker: Spawn / Resume agent turn loop
     API-->>Proxy: 200 OK (Content-Type: text/event-stream)
     Proxy-->>UI: 200 OK (Connection: close, Text/Event-Stream)
@@ -351,9 +359,9 @@ The table below catalogs every component in the repository, defining its runtime
 
 | File / Component | Primary Responsibility | Upstream / Inputs | Downstream / Outputs | Concurrency & Security Invariants |
 | :--- | :--- | :--- | :--- | :--- |
-| [`proxy.py`](file:///e:/hermes-uplink/proxy.py) | Loopback reverse proxy, authentication gate, and asset integrity firewall. | Inbound HTTP from Edge / Tailscale; `.uplink-key.txt`, `.uplink-pass.txt`. | Hermes API Server (`http://127.0.0.1:8642`), Edge Client responses. | • Binds strictly to `127.0.0.1`.<br/>• SHA-256 asset hash enforcement.<br/>• Semaphores: Max 32 active proxy requests, 128 connections.<br/>• Auth Rate Limiting: 10 failures / 60s per IP. |
+| [`proxy.py`](file:///e:/hermes-uplink/proxy.py) | Loopback reverse proxy, authentication gate, and asset integrity firewall. | Inbound HTTP from Edge / Tailscale; `.uplink-key.txt`, `.uplink-pass.txt`. | Hermes API Server (`http://127.0.0.1:8642`), Edge Client responses. | • Binds strictly to `127.0.0.1`.<br/>• SHA-256 asset hash enforcement.<br/>• Forwards `Idempotency-Key` and `X-Client-Turn-ID`.<br/>• Semaphores: Max 32 active proxy requests, 128 connections.<br/>• Auth Rate Limiting: 10 failures / 60s per IP. |
 | [`internet_access.py`](file:///e:/hermes-uplink/internet_access.py) | Tailscale Funnel manager, status parser, conflict guard, and interactive setup. | CLI arguments, `tailscale.exe status/funnel --json`, local proxy health. | Tailscale daemon configuration, console status output. | • Validates `.ts.net` hostname regex.<br/>• Refuses to overwrite foreign port 443 routes.<br/>• Never stores credentials in checkout. |
-| [`index.html`](file:///e:/hermes-uplink/index.html) | Single-page thin client, chat UI, markdown presenter, clarify card handler, model selector. | User DOM events, REST/SSE from `proxy.py`, `localStorage`. | Rendered DOM, outgoing REST/SSE requests, clipboard operations. | • Zero build step.<br/>• Network-only for live dynamic data.<br/>• Battery-friendly focus-based synchronization.<br/>• Scoped hotkey capture. |
+| [`index.html`](file:///e:/hermes-uplink/index.html) | Single-page thin client, chat UI, markdown presenter, clarify card handler, model selector. | User DOM events, REST/SSE from `proxy.py`, `localStorage`. | Rendered DOM, outgoing REST/SSE requests, clipboard operations. | • Zero build step.<br/>• Non-destructive last-render thread cache (`sessionRenderCache`).<br/>• Turn idempotency UUID generator.<br/>• Composer draft autosave in `localStorage`.<br/>• Online/offline banner & auto-recovery.<br/>• Battery-friendly focus-based synchronization. |
 | [`sw.js`](file:///e:/hermes-uplink/sw.js) | Progressive Web App service worker for offline shell installation. | Browser service worker lifecycle events. | Cache storage (`uplink-shell-v2`), fetches `vendor/marked.umd.js`, `manifest.webmanifest`. | • Never caches `index.html` or `/api/*` to eliminate stale UI state drifts. |
 | [`console_utils.py`](file:///e:/hermes-uplink/console_utils.py) | Windows console QuickEdit mode enabler. | Win32 `kernel32.dll` via `ctypes`. | Console input buffer flags. | • Safe no-op on non-Windows platforms or non-interactive stdout. |
 | [`launch_local.bat`](file:///e:/hermes-uplink/launch_local.bat) | Windows batch script for local configuration, credential generation, and service management. | User CLI, `hermes config`, environment variables. | Writes `.uplink-key.txt`, `.uplink-pass.txt`, launches `proxy.py`. | • Idempotent first-run initialization.<br/>• Validates API key and passphrase formats.<br/>• Restarts Hermes gateway gracefully. |
@@ -397,7 +405,20 @@ Client (Edge Browser)
 
 ### 5.2 Server-Sent Events (SSE) Wire Frame Specifications
 
-Over `/api/sessions/{id}/chat/stream`, events are framed as standard SSE (`text/event-stream`):
+#### Request Contract: `POST /api/sessions/{id}/chat/stream`
+* **HTTP Headers:**
+  * `Content-Type: application/json`
+  * `Idempotency-Key: <UUID>` *(Forwarded to upstream)*
+  * `X-Client-Turn-ID: <UUID>` *(Forwarded to upstream)*
+* **JSON Body Payload:**
+  ```json
+  {
+    "input": "User prompt text",
+    "client_turn_id": "<UUID>"
+  }
+  ```
+
+Over `/api/sessions/{id}/chat/stream`, responses are framed as standard SSE (`text/event-stream`):
 
 #### Event: `assistant.delta` (Text streaming)
 ```json
@@ -454,6 +475,41 @@ Over `/api/sessions/{id}/chat/stream`, events are framed as standard SSE (`text/
 
 ---
 
+### 5.3 Clarify Transport & Interactive Resolution Contract
+
+The interactive clarification system decouples downstream notification (SSE event) from upstream resolution (dedicated HTTP RPC). This eliminates stream multiplexing collisions and 409 turn-lease locks.
+
+#### Dedicated Clarify Endpoints
+
+1. **Resolution RPC:** `POST /api/sessions/{session_id}/clarify/respond`
+   - **Request Headers:** `Content-Type: application/json`, `Cookie: hermes_uplink_session=...` (Proxy attaches upstream `Authorization: Bearer <KEY>`).
+   - **Request Body:**
+     ```json
+     {
+       "clarify_id": "c1a2b3c4d5",
+       "answer": "PostgreSQL"
+     }
+     ```
+     *(For multi-select, `answer` is serialized JSON array `["A", "B"]`; for composite batches, serialized object `{"answers": {"q0": "A", "q1": "B"}}`; for empty/skip, `""`).*
+   - **Responses:**
+     - `200 OK {"ok": true, "clarify_id": "c1a2b3c4d5", "status": "resolved"}`: Successfully unblocks agent worker thread.
+     - `409 Conflict {"error": {"message": "Clarify request has expired or was already resolved", "code": "clarify_expired"}}`: First-writer-wins race resolution (e.g. user answered on Telegram or timer expired); client UI settles card gracefully.
+
+2. **Mobile Reconnection Recovery Probe:** `GET /api/sessions/{session_id}/clarify/pending`
+   - **Trigger:** Fired by client on `window.focus` and `document.visibilitychange` to restore active card if phone slept or SSE dropped mid-turn.
+   - **Responses:**
+     - Pending: `200 OK {"pending": true, "clarify": {"clarify_id": "...", "question": "...", "choices": [...], "urgency": "medium"}}`
+     - Idle / Completed: `200 OK {"pending": false}`
+
+#### UI Card Lifecycle States & Behaviors
+
+- **Pending State (`.clarify-card.pending`):** Renders question header, urgency badge (`low`, `medium`, `high`, `blocking`), live countdown timer (auto-resolves on expiry), and input controls (single-select hotkey buttons `A..D` / `1..N`, multi-select checkboxes, or auto-focused "Other" free-text input).
+- **Composite Batch Form:** When `questions: [...]` array is present, renders separate numbered groups with progress tracking and a single "Submit All Answers" dispatch.
+- **Settled State (`.clarify-card.settled`):** Replaces interactive buttons with an immutable summary containing the question title and answer badge (or *(Skipped)* representation).
+- **Composer Deadlock Breaker:** If a user types a new prompt into the bottom composer while a clarify card is active, `send()` automatically fires an empty-string skip RPC (`answer: ""`) to unblock the agent worker before streaming the new turn.
+
+---
+
 ## 6. Security Architecture & Threat Model
 
 ```
@@ -485,12 +541,12 @@ Over `/api/sessions/{id}/chat/stream`, events are framed as standard SSE (`text/
 
 ```python
 PINNED_ASSET_HASHES = {
-    "index.html": "FO1ZLyiFYbh7WweEL1t0XywkqtTx4WvLr3CCimMzvNM=",
+    "index.html": "XXxwVecbzJb0F+UFFY2km9kTr8vGJ+eRqN2h2LmS0sw=",
     "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
     "sw.js": "KN3cJrmqGrA4FoLawEWBBDZfXIR7rX66PcM3M4u/eAo=",
 }
-INLINE_SCRIPT_HASH = "TeS4kJcdzYMsO89F2IGXjhU0VEgSCNiJHXo5SXFdx6o="
-INLINE_STYLE_HASH = "2W8DSglTcGEKQ5B4x5T9wF0YPmfhfkJfTeL2lPRoiUg="
+INLINE_SCRIPT_HASH = "Z7ntdQABj8+CpxAqArHTKrMFnPlgbV1DjoQQaWALFxI="
+INLINE_STYLE_HASH = "ywvUrZN2ywgxhogYu9hkVD//zxjRx8qGTJlIkKyVYzw="
 ```
 
 ---
