@@ -275,6 +275,11 @@
   .toast.show{opacity:1; transform:translateY(0)}
   .toast.error{border-color:var(--red); color:#ff7b72}
   .toast.success{border-color:var(--green); color:#7ee787}
+  /* offline banner */
+  #offlineBanner{position:fixed; top:0; left:0; right:0; z-index:1001; background:#d29922; color:#1a1300; font-size:12px; font-weight:600; padding:7px 12px; display:flex; align-items:center; justify-content:center; gap:10px; box-shadow:0 2px 10px rgba(0,0,0,0.4)}
+  #offlineBanner.hidden{display:none !important}
+  #offlineBanner button{background:#1a1300; color:#fff; border:none; padding:3px 10px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer}
+  #offlineBanner button:hover{background:#382700}
   @media (max-width:600px){
     .modelchip{max-width:120px}
   }
@@ -282,6 +287,10 @@
 </style>
 </head>
 <body>
+  <div class="offline-banner hidden" id="offlineBanner">
+    <span id="offlineBannerText">&#9888; Offline — Reconnecting to Uplink…</span>
+    <button type="button" id="offlineRetryBtn">Retry Now</button>
+  </div>
   <div id="sidebar">
     <div class="bar">
       <h1>Hermes Uplink</h1>
@@ -407,7 +416,41 @@ let activeId = null;
 let streaming = false;
 let streamingSessionId = null;   // which session owns the active stream
 let currentAbort = null;
+const sessionRenderCache = new Map();
 const FINE_POINTER = window.matchMedia("(pointer: fine)").matches;
+
+function generateUUID(){
+  if(typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"){
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, function(c){
+    const r = Math.random() * 16 | 0;
+    const v = c === "x" ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+function draftKey(sessId){ return "hermes-uplink-draft-" + (sessId || "global"); }
+function saveDraft(sessId, val){
+  try{
+    if(val && val.trim()) localStorage.setItem(draftKey(sessId), val);
+    else localStorage.removeItem(draftKey(sessId));
+  }catch(e){}
+}
+function loadDraft(sessId){
+  try{ return localStorage.getItem(draftKey(sessId)) || ""; }catch(e){ return ""; }
+}
+
+function showOfflineBanner(show, msg){
+  const b = document.getElementById("offlineBanner");
+  if(!b) return;
+  if(show){
+    if(msg) document.getElementById("offlineBannerText").textContent = msg;
+    b.classList.remove("hidden");
+  }else{
+    b.classList.add("hidden");
+  }
+}
 
 function loadCfg(){
   try{
@@ -470,13 +513,16 @@ async function ensureAuth(){
   }
   try{
     const r = await api("/api/sessions?limit=1");
+    showOfflineBanner(false);
     if(r.status !== 401) return true;
     if(externalMode()){
       showToast("External API unauthorized. Check the API key in Settings.", "error");
       return true;
     }
   }catch(e){
-    showAuth("Cannot reach the Uplink proxy: "+(e.message||e));
+    setStatus("bad");
+    showOfflineBanner(true, "⚠️ Offline — Cannot reach Uplink proxy. Reconnecting…");
+    scheduleProbe();
     return false;
   }
   showAuth("Enter the passphrase shown on your desktop launcher.");
@@ -507,6 +553,7 @@ async function submitAuth(){
     if(r.status===204){
       document.getElementById("authInput").value = "";
       document.getElementById("authModal").classList.add("hidden");
+      showOfflineBanner(false);
       boot();
     }else if(r.status===429){
       document.getElementById("authDiag").textContent = "Too many attempts. Wait briefly and try again.";
@@ -538,9 +585,18 @@ function setStatus(state){
 async function probe(){
   try{
     const r = await api("/health");
-    setStatus(r.ok ? "ok" : "bad");
-    if(!r.ok) scheduleProbe(); else clearTimeout(retryTimer);
-  }catch{ setStatus("bad"); scheduleProbe(); }
+    const ok = r.ok;
+    setStatus(ok ? "ok" : "bad");
+    if(ok){
+      showOfflineBanner(false);
+      clearTimeout(retryTimer);
+    } else {
+      scheduleProbe();
+    }
+  }catch{
+    setStatus("bad");
+    scheduleProbe();
+  }
 }
 function scheduleProbe(){
   clearTimeout(retryTimer);
@@ -1215,7 +1271,10 @@ async function applyModel(model, provider, setDefault = false){
 }
 
 /* ---------- boot ---------- */
+let booted = false;
 function boot(){
+  if(booted) return;
+  booted = true;
   probe();
   loadSessions();
   updateRingState();
@@ -1234,7 +1293,12 @@ function boot(){
    "switch devices a few times a day" pattern. */
 let refreshing = false;
 async function refresh(){
-  if(refreshing || !activeId) { await loadSessions(); return; }
+  if(refreshing) return;
+  if(streaming && streamingSessionId === activeId){
+    await loadSessions();
+    return;
+  }
+  if(!activeId) { await loadSessions(); return; }
   refreshing = true;
   const btn = document.getElementById("refreshBtn");
   btn.style.opacity = "0.5";
@@ -1361,6 +1425,11 @@ async function openSession(id, title){
   activeId = id;
   updateIdChip();
   document.getElementById("activeTitle").textContent = title || id;
+  const inputEl = document.getElementById("input");
+  if(inputEl){
+    inputEl.value = loadDraft(id);
+    updateRingState();
+  }
   try{
     const r = await api("/api/sessions/"+encodeURIComponent(id)+"/messages");
     if(!r.ok) throw new Error("HTTP "+r.status);
@@ -1384,7 +1453,23 @@ async function openSession(id, title){
     applyContextFrom(data);
     const msgs = data.data || data.messages || (Array.isArray(data)?data:[]);
     if(activeId === id) renderThread(msgs);
-  }catch(e){ if(activeId === id){ renderThread([]); addMsg("system","Could not load history: "+e.message); } }
+  }catch(e){
+    if(activeId === id){
+      setStatus("bad");
+      showToast("Could not load history: " + (e.message || e), "error");
+      const t = document.getElementById("thread");
+      // NON-DESTRUCTIVE HISTORY INVARIANT: Do not clear thread on network failure.
+      // If DOM is unpopulated, restore strictly from this session's cached render if available.
+      if(!t.hasChildNodes()){
+        const cached = sessionRenderCache.get(id);
+        if(cached && cached.length > 0){
+          renderThread(cached);
+        } else {
+          addMsg("system", "Could not load history: " + (e.message || e));
+        }
+      }
+    }
+  }
   if(activeId !== id) return;
   document.querySelectorAll(".sess").forEach(x=>x.classList.remove("active"));
   await loadSessions();
@@ -1460,6 +1545,9 @@ function flushRender(bubble){
 async function streamTurn(text, sessionId, opts={}){
   if(streaming) return;
   const addUser = opts.addUser !== false;
+  // NOTE (Idempotency Contract): Client generates turnId forwarded via Idempotency-Key / X-Client-Turn-ID / client_turn_id.
+  // Transport plumbing is live; upstream deduplication state machine is pending in api_server.py.
+  const turnId = opts.turnId || generateUUID();
   const title = document.getElementById("activeTitle").textContent;
   if(addUser) addMsg("user", text);
   const abortCtrl = new AbortController();
@@ -1471,11 +1559,22 @@ async function streamTurn(text, sessionId, opts={}){
   bubble._curRaw = "";
   try{
     const r = await api("/api/sessions/"+encodeURIComponent(sessionId)+"/chat/stream", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({input:text}),
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json",
+        "Idempotency-Key": turnId,
+        "X-Client-Turn-ID": turnId
+      },
+      body: JSON.stringify({input:text, client_turn_id: turnId}),
       signal: abortCtrl.signal
     });
-    if(!r.ok) throw new Error("HTTP "+r.status+" "+await r.text());
+    if(!r.ok){
+      const errText = await r.text().catch(()=> "");
+      throw new Error("HTTP "+r.status+(errText ? " "+errText : ""));
+    }
+    // Stream established: safely clear draft from storage
+    saveDraft(sessionId, "");
+    saveDraft(null, "");
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
@@ -1492,6 +1591,13 @@ async function streamTurn(text, sessionId, opts={}){
     }
     if(buf.trim()) handleFrame(buf, bubble);
   }catch(e){
+    // If stream failed before delivery, preserve draft in storage and restore to input if empty
+    saveDraft(sessionId, text);
+    const inputEl = document.getElementById("input");
+    if(inputEl && !inputEl.value && activeId === sessionId){
+      inputEl.value = text;
+      updateRingState();
+    }
     const body = getOrCreateActiveBody(bubble);
     if(e && e.name === "AbortError") body.textContent += "\n[stopped]";
     else body.textContent += "\n[error] " + (e && e.message ? e.message : e);
@@ -1663,6 +1769,7 @@ function addMsg(role, text){
   return d;
 }
 function renderThread(msgs){
+  if(activeId) sessionRenderCache.set(activeId, Array.isArray(msgs) ? msgs.slice() : []);
   const t = document.getElementById("thread");
   t.replaceChildren();
 
@@ -2163,7 +2270,10 @@ document.getElementById("input").addEventListener("keydown", e=>{
     e.target.blur();                        // Escape dismisses the keyboard
   }
 });
-document.getElementById("input").addEventListener("input", updateRingState);
+document.getElementById("input").addEventListener("input", ()=>{
+  saveDraft(activeId, document.getElementById("input").value);
+  updateRingState();
+});
 document.getElementById("newBtn").onclick = newSession;
 document.getElementById("refreshBtn").onclick = refresh;
 document.getElementById("searchInput").addEventListener("input", ()=> loadSessions());
@@ -2235,6 +2345,35 @@ document.getElementById("customModelApplyBtn").onclick = ()=>{
   const isSetDef = document.getElementById("modelSetDefault").checked;
   applyModel(mod, prov, isSetDef);
 };
+document.getElementById("offlineRetryBtn").onclick = async ()=>{
+  showToast("Reconnecting…", "info");
+  const inputEl = document.getElementById("input");
+  if(inputEl && !inputEl.value){
+    inputEl.value = loadDraft(activeId) || loadDraft(null);
+    updateRingState();
+  }
+  const authed = await ensureAuth();
+  if(authed) boot();
+};
+
+window.addEventListener("online", async () => {
+  showOfflineBanner(false);
+  if(!booted){
+    const authed = await ensureAuth();
+    if(authed) boot();
+  } else {
+    probe();
+    refresh();
+    probePendingClarify();
+  }
+});
+window.addEventListener("offline", () => {
+  setStatus("bad");
+  showOfflineBanner(true, "⚠️ Offline — Internet connection lost");
+});
+window.addEventListener("pagehide", () => {
+  try { stop(); } catch {}
+});
 
 /* message-action delegation (desktop hover buttons + mobile layout) */
 document.getElementById("thread").addEventListener("click", e=>{

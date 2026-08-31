@@ -17,6 +17,8 @@ import proxy  # noqa: E402
 class UpstreamHandler(BaseHTTPRequestHandler):
     last_authorization = None
     last_content_length = None
+    last_idempotency_key = None
+    last_client_turn_id = None
 
     def _send(self, body=b'{"sessions":[]}'):
         self.send_response(200)
@@ -27,6 +29,8 @@ class UpstreamHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         UpstreamHandler.last_authorization = self.headers.get("Authorization")
+        UpstreamHandler.last_idempotency_key = self.headers.get("Idempotency-Key")
+        UpstreamHandler.last_client_turn_id = self.headers.get("X-Client-Turn-ID")
         if self.path == "/api/stream":
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
@@ -38,6 +42,8 @@ class UpstreamHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         UpstreamHandler.last_authorization = self.headers.get("Authorization")
         UpstreamHandler.last_content_length = self.headers.get("Content-Length")
+        UpstreamHandler.last_idempotency_key = self.headers.get("Idempotency-Key")
+        UpstreamHandler.last_client_turn_id = self.headers.get("X-Client-Turn-ID")
         length = int(self.headers.get("Content-Length", "0"))
         if length:
             self.rfile.read(length)
@@ -233,6 +239,82 @@ class ProxyIntegrationTests(unittest.TestCase):
         is_match, _, mismatches = proxy.check_pinned_hashes()
         self.assertTrue(is_match)
         self.assertEqual(mismatches, [])
+
+    def test_idempotency_headers_are_forwarded_upstream(self):
+        cookie = self.authenticate()
+        UpstreamHandler.last_idempotency_key = None
+        UpstreamHandler.last_client_turn_id = None
+        test_uuid = "12345678-1234-5678-1234-567812345678"
+        status, _, _ = self.request(
+            "POST",
+            "/api/sessions/s1/chat/stream",
+            body=json.dumps({"input": "hello", "client_turn_id": test_uuid}),
+            headers={
+                "Cookie": cookie,
+                "Content-Type": "application/json",
+                "Idempotency-Key": test_uuid,
+                "X-Client-Turn-ID": test_uuid,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(UpstreamHandler.last_idempotency_key, test_uuid)
+        self.assertEqual(UpstreamHandler.last_client_turn_id, test_uuid)
+
+    def test_client_non_destructive_history_and_race_guards(self):
+        # Scope-limited substring assertions against index.html. We do NOT
+        # execute the JS (no jsdom in this harness), but the assertions are
+        # bounded to specific function bodies so they don't false-positive on
+        # unrelated renderThread([]) calls or whitespace tweaks elsewhere.
+        #
+        # If you find yourself tempted to make these assertions more permissive
+        # (e.g. dropping whitespace checks), the right move is to add a jsdom
+        # harness under tests/jsdom/ and exercise the actual functions.
+        root = Path(__file__).resolve().parents[1]
+        lines = (root / "index.html").read_text(encoding="utf-8").splitlines()
+
+        def line_range(start, end):
+            # 1-indexed inclusive
+            return "\n".join(lines[start - 1:end])
+
+        # Locate the openSession catch block by searching for the marker comment
+        # Gemini added at the top of it. If that marker is removed, this test
+        # fails loudly — that's the point.
+        marker_idx = None
+        for i, ln in enumerate(lines, start=1):
+            if "NON-DESTRUCTIVE HISTORY INVARIANT" in ln:
+                marker_idx = i
+                break
+        self.assertIsNotNone(
+            marker_idx,
+            "openSession catch block marker missing — non-destructive invariant anchor lost",
+        )
+
+        # Bounded read: from marker to 12 lines below (covers the if-block).
+        block = line_range(marker_idx, marker_idx + 12)
+        self.assertIn("sessionRenderCache.get(id)", block)
+        # The whole point of the fix: renderThread([]) must NOT appear in this block.
+        self.assertNotIn("renderThread([])", block)
+        # And the catch must NOT unconditionally add an error message either;
+        # it must check whether the thread is empty first.
+        self.assertIn("t.hasChildNodes()", block)
+
+        # refresh() active-stream guard: find the function and read its first ~12 lines.
+        refresh_idx = None
+        for i, ln in enumerate(lines, start=1):
+            if ln.startswith("async function refresh(){"):
+                refresh_idx = i
+                break
+        self.assertIsNotNone(refresh_idx, "refresh() function not found")
+        refresh_block = line_range(refresh_idx, refresh_idx + 10)
+        self.assertIn("streamingSessionId === activeId", refresh_block)
+
+        # Lifecycle listeners must be wired at the bottom of the file (pagehide, online, offline).
+        # We just check the substrings exist; exact line numbers drift with edits.
+        full = (root / "index.html").read_text(encoding="utf-8")
+        self.assertIn('window.addEventListener("online"', full)
+        self.assertIn('window.addEventListener("offline"', full)
+        self.assertIn('window.addEventListener("pagehide"', full)
+        self.assertIn('offlineRetryBtn', full)
 
 
 if __name__ == "__main__":
