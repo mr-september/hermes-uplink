@@ -53,13 +53,13 @@ PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 # reviewed change as the corresponding static asset; startup then fails closed
 # if the deployed files drift.
 PINNED_ASSET_HASHES = {
-    "index.html": "FO1ZLyiFYbh7WweEL1t0XywkqtTx4WvLr3CCimMzvNM=",
+    "index.html": "XXxwVecbzJb0F+UFFY2km9kTr8vGJ+eRqN2h2LmS0sw=",
     "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
     "sw.js": "KN3cJrmqGrA4FoLawEWBBDZfXIR7rX66PcM3M4u/eAo=",
 }
 
-INLINE_SCRIPT_HASH = "TeS4kJcdzYMsO89F2IGXjhU0VEgSCNiJHXo5SXFdx6o="
-INLINE_STYLE_HASH = "2W8DSglTcGEKQ5B4x5T9wF0YPmfhfkJfTeL2lPRoiUg="
+INLINE_SCRIPT_HASH = "Z7ntdQABj8+CpxAqArHTKrMFnPlgbV1DjoQQaWALFxI="
+INLINE_STYLE_HASH = "ywvUrZN2ywgxhogYu9hkVD//zxjRx8qGTJlIkKyVYzw="
 TEXT_ASSETS = frozenset(("index.html", "sw.js"))
 
 
@@ -563,7 +563,7 @@ class Handler(BaseHTTPRequestHandler):
             url = UPSTREAM + path
             data = body if body else (b"" if method in ("POST", "PUT", "PATCH") else None)
             request = urllib.request.Request(url, data=data, method=method)
-            for name in ("Content-Type", "Accept", "Last-Event-ID"):
+            for name in ("Content-Type", "Accept", "Last-Event-ID", "Idempotency-Key", "X-Client-Turn-ID"):
                 value = self.headers.get(name)
                 if value:
                     request.add_header(name, value)
