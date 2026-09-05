@@ -14,6 +14,7 @@ import logging
 import os
 import re
 import secrets
+import select
 import socket
 import sys
 import time
@@ -42,6 +43,7 @@ REQUEST_HEADER_TIMEOUT = 30
 SESSION_COOKIE = "hermes_uplink_session"
 HEALTH_PROBE_HEADER = "X-Hermes-Uplink-Health"
 HEALTH_PROBE_VALUE = "1"
+SSE_KEEPALIVE_INTERVAL = 15
 HERE = os.path.dirname(os.path.abspath(__file__))
 PID_FILE = os.path.join(HERE, ".uplink.pid")
 API_KEY = os.environ.get("HERMES_API_KEY", "")
@@ -53,13 +55,13 @@ PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 # reviewed change as the corresponding static asset; startup then fails closed
 # if the deployed files drift.
 PINNED_ASSET_HASHES = {
-    "index.html": "XXxwVecbzJb0F+UFFY2km9kTr8vGJ+eRqN2h2LmS0sw=",
+    "index.html": "7Cpx8AEmZkNxjArQycZkyLWD8+FJVCF9Ep7qLHG7sPk=",
     "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
     "sw.js": "KN3cJrmqGrA4FoLawEWBBDZfXIR7rX66PcM3M4u/eAo=",
 }
 
-INLINE_SCRIPT_HASH = "Z7ntdQABj8+CpxAqArHTKrMFnPlgbV1DjoQQaWALFxI="
-INLINE_STYLE_HASH = "ywvUrZN2ywgxhogYu9hkVD//zxjRx8qGTJlIkKyVYzw="
+INLINE_SCRIPT_HASH = "yVYZEDGR+/1nj0eRI4K497ygfp9XhNT811UUIkmMwwo="
+INLINE_STYLE_HASH = "sOFvTL342oglar4dvIsZHxzZ6zTej417d+htjyCYSTQ="
 TEXT_ASSETS = frozenset(("index.html", "sw.js"))
 
 
@@ -601,12 +603,39 @@ class Handler(BaseHTTPRequestHandler):
             self.connection.settimeout(UPSTREAM_TIMEOUT)
             try:
                 if self.command != "HEAD":
-                    while True:
-                        chunk = getattr(response, "read1", response.read)(4096)
-                        if not chunk:
-                            break
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
+                    if is_event_stream:
+                        fileno = None
+                        try:
+                            fileno = response.fileno()
+                        except (AttributeError, OSError, ValueError):
+                            fileno = None
+
+                        while True:
+                            if fileno is not None:
+                                try:
+                                    rlist, _, _ = select.select(
+                                        [fileno], [], [], SSE_KEEPALIVE_INTERVAL
+                                    )
+                                except (OSError, ValueError):
+                                    break
+                                if not rlist:
+                                    # Upstream quiet for SSE_KEEPALIVE_INTERVAL seconds.
+                                    # Inject SSE comment ping to prevent cellular CGNAT drops.
+                                    self.wfile.write(b": ping\n\n")
+                                    self.wfile.flush()
+                                    continue
+                            chunk = getattr(response, "read1", response.read)(65536)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
+                    else:
+                        while True:
+                            chunk = getattr(response, "read1", response.read)(4096)
+                            if not chunk:
+                                break
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 LOGGER.debug("client disconnected during upstream stream")
             except Exception:

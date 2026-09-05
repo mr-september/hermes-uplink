@@ -103,14 +103,14 @@ The codebase is intentionally lean and modular, relying strictly on standard lib
 ```mermaid
 graph TD
     subgraph FRONTEND["Edge / Client-Side Presentation Layer"]
-        INDEX_HTML["<b>index.html</b><br/>• Reactive 3-pane responsive layout<br/>• SSE stream decoder & non-destructive render<br/>• Turn idempotency (UUID / Idempotency-Key)<br/>• Clarify interactive question cards<br/>• Model & Provider selector modal<br/>• Composer draft autosave (localStorage)<br/>• Online/offline banner & auto-recovery<br/>• Battery-friendly focus refresh"]
+        INDEX_HTML["<b>index.html</b><br/>• Reactive 3-pane responsive layout<br/>• Orientation-gated sidebar pinning (dock vs flyout)<br/>• SSE stream decoder & non-destructive render<br/>• Turn idempotency (Draft-bound UUID / Idempotency-Key)<br/>• Clarify interactive question cards<br/>• Model & Provider selector modal<br/>• Composer draft autosave & history reconciliation<br/>• Online/offline banner & auto-recovery<br/>• Session pre-render cache isolation<br/>• Battery-friendly focus refresh"]
         VENDOR_MARKED["<b>vendor/marked.umd.js</b><br/>• Pinned offline Markdown parser (v17)"]
         SW_JS["<b>sw.js</b><br/>• PWA service worker shell caching<br/>• Dynamic asset bypass"]
         MANIFEST["<b>manifest.webmanifest</b><br/>• Mobile PWA metadata & icons"]
     end
 
     subgraph PROXY_LAYER["Reverse Proxy & Gateway Security Layer"]
-        PROXY_PY["<b>proxy.py</b><br/>• UplinkServer (ThreadingHTTPServer)<br/>• Handler (BaseHTTPRequestHandler)<br/>• Session Gate & Rate Limiting (AUTH_ATTEMPTS)<br/>• SHA-256 Pinned Asset Validator<br/>• Forward Idempotency-Key & X-Client-Turn-ID<br/>• HTTP Header & Body Sanitizer<br/>• SSE Connection Delimiting"]
+        PROXY_PY["<b>proxy.py</b><br/>• UplinkServer (ThreadingHTTPServer)<br/>• Handler (BaseHTTPRequestHandler)<br/>• Session Gate & Rate Limiting (AUTH_ATTEMPTS)<br/>• SHA-256 Pinned Asset Validator<br/>• Forward Idempotency-Key & X-Client-Turn-ID<br/>• SSE Keepalive Heartbeats (15s : ping)<br/>• HTTP Header & Body Sanitizer<br/>• SSE Connection Delimiting"]
         CONSOLE_UTILS["<b>console_utils.py</b><br/>• Win32 Console QuickEdit Enabler"]
     end
 
@@ -353,15 +353,55 @@ sequenceDiagram
 
 ---
 
+### 3.5 Client Layout Engine, Draft Reconciliation & Connection Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> DeviceCheck
+    DeviceCheck --> FlyoutDrawer: Portrait or Width < 768px
+    DeviceCheck --> PinnableDesktop: Landscape >= 768px or Width >= 1024px
+
+    state PinnableDesktop {
+        [*] --> CheckPref
+        CheckPref --> DockedPinned: Stored Pref = true (or default >= 1024px)
+        CheckPref --> FlyoutOverlay: Stored Pref = false
+
+        DockedPinned --> FlyoutOverlay: User clicks #pinSidebarBtn (Unpin)
+        FlyoutOverlay --> DockedPinned: User clicks #pinSidebarBtn (Pin)
+    }
+
+    state FlyoutOverlay {
+        [*] --> Hidden
+        Hidden --> Visible: #menuBtn clicked
+        Visible --> Hidden: Session selected, Scrim clicked, or Escape key
+    }
+```
+
+#### 1. Orientation-Gated Sidebar Pinning
+- **Media Query Gating:** Evaluated via `(min-width: 1024px), (min-width: 768px) and (orientation: landscape)`. On mobile phones or portrait tablets, the sidebar is strictly an overlay flyout drawer and the pin button is hidden from view (`display: none !important`).
+- **Zero-CLS Pre-Paint:** `applySidebarState()` executes synchronously on script initialization to set `.sidebar-pinned` on `document.body` prior to initial paint, eliminating Cumulative Layout Shift.
+- **Auto-Dismiss Invariants:** In flyout mode, clicking an item in `.sess`, tapping the `#scrim` backdrop, or pressing the `Escape` key automatically closes the drawer and dismisses the scrim. In pinned mode, `#menuBtn` and `#scrim` are completely hidden.
+
+#### 2. Session Switching Isolation & Draft Reconciliation
+- **Pre-Render Isolation:** `currentRenderedSessionId` tracks the thread currently attached to the DOM. When opening a new session, the thread is immediately pre-rendered from `sessionRenderCache` or cleared before fetching history, preventing previous session messages from persisting during network lag.
+- **Draft & Turn ID Lifecycle:** When composing a message, drafts are saved to `localStorage` keyed by session ID (`hermes-uplink-draft-{id}`). When `send()` triggers, an idempotency turn ID UUID is generated and persisted (`hermes-uplink-turn-{id}`). If the network drops or stream creation fails, both the draft text and the identical turn ID are restored to the input box.
+- **History Reconciliation:** Upon successful history retrieval (`reconcileDraftWithMessages`), the client checks if the latest user turn in history matches the pending draft. If matched, the stored draft and turn ID are evicted, avoiding duplicate sends.
+
+#### 3. SSE Keepalive Comment Heartbeats
+- `proxy.py` monitors the upstream stream socket using `select.select()` with a 15-second timeout (`SSE_KEEPALIVE_INTERVAL`). If upstream has remained silent for 15 seconds, a raw SSE comment (`: ping\n\n`) is written and flushed to the client.
+- The browser client's SSE frame processor discards comment frames immediately (`if(frame.startsWith(":")) return;`), ensuring long-running reasoning or tool turns are not terminated by aggressive cellular CGNAT or middlebox TCP connection timeouts.
+
+---
+
 ## 4. Module & File Inventory Matrix
 
 The table below catalogs every component in the repository, defining its runtime role, communication contracts, upstream/downstream dependencies, and failure handling strategy.
 
 | File / Component | Primary Responsibility | Upstream / Inputs | Downstream / Outputs | Concurrency & Security Invariants |
 | :--- | :--- | :--- | :--- | :--- |
-| [`proxy.py`](file:///e:/hermes-uplink/proxy.py) | Loopback reverse proxy, authentication gate, and asset integrity firewall. | Inbound HTTP from Edge / Tailscale; `.uplink-key.txt`, `.uplink-pass.txt`. | Hermes API Server (`http://127.0.0.1:8642`), Edge Client responses. | • Binds strictly to `127.0.0.1`.<br/>• SHA-256 asset hash enforcement.<br/>• Forwards `Idempotency-Key` and `X-Client-Turn-ID`.<br/>• Semaphores: Max 32 active proxy requests, 128 connections.<br/>• Auth Rate Limiting: 10 failures / 60s per IP. |
+| [`proxy.py`](file:///e:/hermes-uplink/proxy.py) | Loopback reverse proxy, authentication gate, and asset integrity firewall. | Inbound HTTP from Edge / Tailscale; `.uplink-key.txt`, `.uplink-pass.txt`. | Hermes API Server (`http://127.0.0.1:8642`), Edge Client responses. | • Binds strictly to `127.0.0.1`.<br/>• SHA-256 asset hash enforcement.<br/>• Forwards `Idempotency-Key` and `X-Client-Turn-ID`.<br/>• SSE keepalive comment injection (15s `: ping`).<br/>• Semaphores: Max 32 active proxy requests, 128 connections.<br/>• Auth Rate Limiting: 10 failures / 60s per IP. |
 | [`internet_access.py`](file:///e:/hermes-uplink/internet_access.py) | Tailscale Funnel manager, status parser, conflict guard, and interactive setup. | CLI arguments, `tailscale.exe status/funnel --json`, local proxy health. | Tailscale daemon configuration, console status output. | • Validates `.ts.net` hostname regex.<br/>• Refuses to overwrite foreign port 443 routes.<br/>• Never stores credentials in checkout. |
-| [`index.html`](file:///e:/hermes-uplink/index.html) | Single-page thin client, chat UI, markdown presenter, clarify card handler, model selector. | User DOM events, REST/SSE from `proxy.py`, `localStorage`. | Rendered DOM, outgoing REST/SSE requests, clipboard operations. | • Zero build step.<br/>• Non-destructive last-render thread cache (`sessionRenderCache`).<br/>• Turn idempotency UUID generator.<br/>• Composer draft autosave in `localStorage`.<br/>• Online/offline banner & auto-recovery.<br/>• Battery-friendly focus-based synchronization. |
+| [`index.html`](file:///e:/hermes-uplink/index.html) | Single-page thin client, chat UI, markdown presenter, clarify card handler, model selector. | User DOM events, REST/SSE from `proxy.py`, `localStorage`. | Rendered DOM, outgoing REST/SSE requests, clipboard operations. | • Zero build step.<br/>• Non-destructive last-render thread cache (`sessionRenderCache`) with pre-render isolation.<br/>• Orientation-gated sidebar pinning & CLS-free pre-paint.<br/>• Draft-bound turn idempotency UUID lifecycle.<br/>• Composer draft autosave in `localStorage` & history reconciliation.<br/>• Online/offline banner & auto-recovery.<br/>• Battery-friendly focus-based synchronization. |
 | [`sw.js`](file:///e:/hermes-uplink/sw.js) | Progressive Web App service worker for offline shell installation. | Browser service worker lifecycle events. | Cache storage (`uplink-shell-v2`), fetches `vendor/marked.umd.js`, `manifest.webmanifest`. | • Never caches `index.html` or `/api/*` to eliminate stale UI state drifts. |
 | [`console_utils.py`](file:///e:/hermes-uplink/console_utils.py) | Windows console QuickEdit mode enabler. | Win32 `kernel32.dll` via `ctypes`. | Console input buffer flags. | • Safe no-op on non-Windows platforms or non-interactive stdout. |
 | [`launch_local.bat`](file:///e:/hermes-uplink/launch_local.bat) | Windows batch script for local configuration, credential generation, and service management. | User CLI, `hermes config`, environment variables. | Writes `.uplink-key.txt`, `.uplink-pass.txt`, launches `proxy.py`. | • Idempotent first-run initialization.<br/>• Validates API key and passphrase formats.<br/>• Restarts Hermes gateway gracefully. |
@@ -541,12 +581,12 @@ The interactive clarification system decouples downstream notification (SSE even
 
 ```python
 PINNED_ASSET_HASHES = {
-    "index.html": "XXxwVecbzJb0F+UFFY2km9kTr8vGJ+eRqN2h2LmS0sw=",
+    "index.html": "7Cpx8AEmZkNxjArQycZkyLWD8+FJVCF9Ep7qLHG7sPk=",
     "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
     "sw.js": "KN3cJrmqGrA4FoLawEWBBDZfXIR7rX66PcM3M4u/eAo=",
 }
-INLINE_SCRIPT_HASH = "Z7ntdQABj8+CpxAqArHTKrMFnPlgbV1DjoQQaWALFxI="
-INLINE_STYLE_HASH = "ywvUrZN2ywgxhogYu9hkVD//zxjRx8qGTJlIkKyVYzw="
+INLINE_SCRIPT_HASH = "yVYZEDGR+/1nj0eRI4K497ygfp9XhNT811UUIkmMwwo="
+INLINE_STYLE_HASH = "sOFvTL342oglar4dvIsZHxzZ6zTej417d+htjyCYSTQ="
 ```
 
 ---

@@ -5,6 +5,7 @@ import json
 import re
 import sys
 import threading
+import time
 import unittest
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,6 +37,22 @@ class UpstreamHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
             self.wfile.write(b"event: run.completed\ndata: {}\n\n")
+            return
+        if self.path == "/api/stream_idle":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.flush()
+            time.sleep(0.3)
+            self.wfile.write(b"event: run.completed\ndata: {}\n\n")
+            self.wfile.flush()
+            return
+        if self.path == "/api/stream_buffered":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(b"event: message\ndata: " + (b"B" * 6000) + b"\n\n")
+            self.wfile.flush()
             return
         self._send()
 
@@ -141,6 +158,25 @@ class ProxyIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(headers["Connection"].lower(), "close")
         self.assertIn(b"run.completed", body)
+
+    def test_event_stream_keepalive_ping_injected_on_idle_upstream(self):
+        cookie = self.authenticate()
+        orig_interval = proxy.SSE_KEEPALIVE_INTERVAL
+        proxy.SSE_KEEPALIVE_INTERVAL = 0.1
+        try:
+            status, headers, body = self.request("GET", "/api/stream_idle", headers={"Cookie": cookie})
+            self.assertEqual(status, 200)
+            self.assertEqual(headers["Connection"].lower(), "close")
+            self.assertIn(b": ping\n\n", body)
+            self.assertIn(b"run.completed", body)
+        finally:
+            proxy.SSE_KEEPALIVE_INTERVAL = orig_interval
+
+    def test_event_stream_buffered_payload_delivered_immediately(self):
+        cookie = self.authenticate()
+        status, headers, body = self.request("GET", "/api/stream_buffered", headers={"Cookie": cookie})
+        self.assertEqual(status, 200)
+        self.assertIn(b"event: message\ndata: " + (b"B" * 6000) + b"\n\n", body)
 
     def test_malformed_and_oversized_requests_are_rejected(self):
         cookie = self.authenticate()
@@ -315,6 +351,15 @@ class ProxyIntegrationTests(unittest.TestCase):
         self.assertIn('window.addEventListener("offline"', full)
         self.assertIn('window.addEventListener("pagehide"', full)
         self.assertIn('offlineRetryBtn', full)
+        self.assertIn('currentRenderedSessionId', full)
+        self.assertIn('loadDraftTurnId', full)
+        self.assertIn('reconcileDraftWithMessages', full)
+        self.assertIn('if(frame.startsWith(":")) return;', full)
+        self.assertIn('pinSidebarBtn', full)
+        self.assertIn('canPinSidebar', full)
+        self.assertIn('isSidebarPinnedEffective', full)
+        self.assertIn('toggleSidebarPin', full)
+        self.assertIn('sidebar-pinned', full)
 
 
 if __name__ == "__main__":
