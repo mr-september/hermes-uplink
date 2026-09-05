@@ -79,7 +79,7 @@ flowchart LR
 - **Battery-Friendly Auto-Refresh:** Refreshes when the tab gains focus or becomes visible.
 - **Real-time Streaming:** Supports streaming turns via Server-Sent Events.
 - **Tool Discovery:** Discovers skills and toolsets through Hermes API endpoints.
-- **Custom UI:** Mobile-responsive three-pane interface with a Hermes-amber theme.
+- **Custom UI:** Mobile-responsive three-pane interface with orientation-gated sidebar pinning and a Hermes-amber theme.
 - **Installable App (PWA):** Use "Add to Home Screen" on iOS/Android for a fullscreen, native app-like experience.
 
 ## Prerequisites
