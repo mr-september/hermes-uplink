@@ -170,20 +170,48 @@
   .modal label{display:block; font-size:12px; color:var(--muted); margin:12px 0 4px}
   .diag{margin-top:12px; font-size:11px; color:var(--muted); white-space:pre-wrap}
   #thread .empty-state{margin:auto; color:var(--muted); text-align:center}
+  .scrim{position:fixed; inset:0; background:#0008; z-index:35}
 
-  /* On desktop the sidebar is always visible, so the hamburger (mobile-only drawer
-     toggle) is a no-op there — hide it to avoid a dead control. */
-  @media (min-width:1024px){ #menuBtn{ display:none } }
+  /* sidebar pin button */
+  #pinSidebarBtn{display:inline-flex; align-items:center; justify-content:center; color:var(--muted); transition:color .15s, border-color .15s, background .15s}
+  #pinSidebarBtn:hover{color:var(--text); border-color:var(--accent)}
+  body.sidebar-pinned #pinSidebarBtn{color:var(--accent); border-color:var(--accent); background:var(--bg3)}
+  body.sidebar-pinned #pinSidebarBtn svg{transform:rotate(-45deg)}
+  #pinSidebarBtn svg{transition:transform .2s ease; display:block}
 
-  /* mobile / tablet: drawers instead of the squished 3-column band */
+  /* large / landscape viewports (pinnable sidebar) */
+  @media (min-width:1024px), (min-width:768px) and (orientation:landscape){
+    body.sidebar-pinned #sidebar{
+      position:static; transform:none; width:280px; min-width:280px; height:100vh; height:100dvh;
+      display:flex; flex-direction:column; z-index:auto; box-shadow:none;
+    }
+    body.sidebar-pinned #menuBtn{display:none}
+    body.sidebar-pinned .scrim{display:none !important}
+
+    body:not(.sidebar-pinned) #sidebar{
+      position:fixed; top:0; left:0; z-index:40; height:100%; height:100dvh; width:280px; min-width:280px;
+      transform:translateX(-100%); transition:transform .2s cubic-bezier(0.16, 1, 0.3, 1); box-shadow:none;
+    }
+    body:not(.sidebar-pinned) #sidebar.open{
+      transform:translateX(0); box-shadow:4px 0 24px rgba(0,0,0,0.5);
+    }
+    body:not(.sidebar-pinned) #menuBtn{display:inline-flex}
+  }
+
+  /* mobile / small portrait devices: strictly drawer-only; pin control hidden */
+  @media (max-width:767px), (max-width:1023px) and (orientation:portrait){
+    #pinSidebarBtn{display:none !important}
+    #sidebar{position:fixed !important; top:0; left:0; z-index:40; height:100%; height:100dvh;
+             padding-top:env(safe-area-inset-top); transform:translateX(-100%) !important; transition:transform .2s}
+    #sidebar.open{transform:none !important}
+    #menuBtn{display:inline-flex !important}
+  }
+
+  /* drawer overlays & safe-area insets on mobile & tablet viewports */
   @media (max-width:1023px){
-    #sidebar{position:fixed; top:0; left:0; z-index:40; height:100%; height:100dvh;
-             padding-top:env(safe-area-inset-top); transform:translateX(-100%); transition:.2s}
-    #sidebar.open{transform:none}
     #right{position:fixed; top:0; right:0; z-index:40; height:100%; height:100dvh;
            padding-top:env(safe-area-inset-top); transform:translateX(100%); transition:.2s}
     #right.open{transform:none}
-    .scrim{position:fixed; inset:0; background:#0008; z-index:35}
     #main > .bar{ padding-top:calc(10px + env(safe-area-inset-top)) }
     #composer{ padding-bottom:calc(10px + env(safe-area-inset-bottom)) }
   }
@@ -294,6 +322,11 @@
   <div id="sidebar">
     <div class="bar">
       <h1>Hermes Uplink</h1>
+      <button class="toolbtn" id="pinSidebarBtn" title="Pin sidebar" aria-label="Pin sidebar" aria-pressed="false">
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .707c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.927 5.927 0 0 1 .16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 0 1-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.909-1.34.788-.12-.12.593-1.146.788-1.34l3.182-3.183L2.947 7.21a.5.5 0 0 1 0-.707c.688-.688 1.673-.766 2.375-.72.348.022.688.072 1.013.16l3.134-3.133a2.772 2.772 0 0 1-.04-.461c0-.43.109-1.022.589-1.503a.5.5 0 0 1 .353-.146z"/>
+        </svg>
+      </button>
       <button class="toolbtn" id="settingsBtn" title="Settings">&#9881;</button>
     </div>
     <div id="search"><input id="searchInput" placeholder="Search sessions…" /></div>
@@ -417,7 +450,58 @@ let streaming = false;
 let streamingSessionId = null;   // which session owns the active stream
 let currentAbort = null;
 const sessionRenderCache = new Map();
+let currentRenderedSessionId = null;
 const FINE_POINTER = window.matchMedia("(pointer: fine)").matches;
+
+/* ---------- Sidebar Pinning & Layout Engine ---------- */
+const PIN_STORAGE_KEY = "hermes-uplink-sidebar-pinned";
+const PIN_MEDIA_QUERY = "(min-width: 1024px), (min-width: 768px) and (orientation: landscape)";
+const pinMatcher = window.matchMedia(PIN_MEDIA_QUERY);
+
+function canPinSidebar(){
+  return pinMatcher.matches;
+}
+
+function isSidebarPinnedPref(){
+  try{
+    const stored = localStorage.getItem(PIN_STORAGE_KEY);
+    if(stored !== null) return stored === "true";
+  }catch(e){}
+  return window.innerWidth >= 1024;
+}
+
+function isSidebarPinnedEffective(){
+  return canPinSidebar() && isSidebarPinnedPref();
+}
+
+function applySidebarState(pinned, openFlyout = false){
+  const effective = canPinSidebar() && pinned;
+  document.body.classList.toggle("sidebar-pinned", effective);
+  const pinBtn = document.getElementById("pinSidebarBtn");
+  if(pinBtn){
+    pinBtn.setAttribute("aria-pressed", effective ? "true" : "false");
+    pinBtn.title = effective ? "Unpin sidebar" : "Pin sidebar";
+  }
+  const s = document.getElementById("sidebar");
+  if(effective){
+    if(s) s.classList.remove("open");
+    toggleScrim(false);
+  } else if(openFlyout){
+    if(s) s.classList.add("open");
+    toggleScrim(true);
+  }
+}
+
+function toggleSidebarPin(){
+  if(!canPinSidebar()) return;
+  const current = document.body.classList.contains("sidebar-pinned");
+  const next = !current;
+  try{ localStorage.setItem(PIN_STORAGE_KEY, String(next)); }catch(e){}
+  applySidebarState(next, !next);
+}
+
+// Initial synchronous execution to prevent CLS
+applySidebarState(isSidebarPinnedPref(), false);
 
 function generateUUID(){
   if(typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"){
@@ -431,14 +515,46 @@ function generateUUID(){
 }
 
 function draftKey(sessId){ return "hermes-uplink-draft-" + (sessId || "global"); }
-function saveDraft(sessId, val){
+function draftTurnKey(sessId){ return "hermes-uplink-turn-" + (sessId || "global"); }
+function saveDraft(sessId, val, turnId){
   try{
-    if(val && val.trim()) localStorage.setItem(draftKey(sessId), val);
-    else localStorage.removeItem(draftKey(sessId));
+    if(val && val.trim()){
+      localStorage.setItem(draftKey(sessId), val);
+      if(turnId) localStorage.setItem(draftTurnKey(sessId), turnId);
+      else if(turnId === "") localStorage.removeItem(draftTurnKey(sessId));
+    }else{
+      localStorage.removeItem(draftKey(sessId));
+      localStorage.removeItem(draftTurnKey(sessId));
+    }
   }catch(e){}
 }
 function loadDraft(sessId){
   try{ return localStorage.getItem(draftKey(sessId)) || ""; }catch(e){ return ""; }
+}
+function loadDraftTurnId(sessId){
+  try{ return localStorage.getItem(draftTurnKey(sessId)) || ""; }catch(e){ return ""; }
+}
+function reconcileDraftWithMessages(sessId, msgs){
+  if(!sessId || !Array.isArray(msgs) || msgs.length === 0) return;
+  const draft = loadDraft(sessId).trim();
+  if(!draft) return;
+  for(let i = msgs.length - 1; i >= 0; i--){
+    const m = msgs[i];
+    if(safeRole(m.role) === "user"){
+      const userText = str(m.content).trim();
+      if(userText && userText === draft){
+        saveDraft(sessId, "");
+        if(activeId === sessId){
+          const inputEl = document.getElementById("input");
+          if(inputEl && inputEl.value.trim() === draft){
+            inputEl.value = "";
+            updateRingState();
+          }
+        }
+      }
+      break;
+    }
+  }
 }
 
 function showOfflineBanner(show, msg){
@@ -1326,6 +1442,7 @@ async function refresh(){
     applyContextFrom(d);
     const msgs = d.data || d.messages || (Array.isArray(d)?d:[]);
     renderThread(msgs);
+    reconcileDraftWithMessages(activeId, msgs);
   }catch(e){
     setStatus("bad");
   }finally{
@@ -1339,7 +1456,8 @@ window.addEventListener("focus", ()=>{ refresh(); probePendingClarify(); });
 /* ---------- sessions ---------- */
 async function loadSessions(){
   const el = document.getElementById("sessionList");
-  showLoading(el);
+  const hasExisting = el.querySelector(".sess");
+  if(!hasExisting) showLoading(el);
   try{
     const r = await api("/api/sessions?limit=200&include_children=true");
     if(r.status === 401){ showAuth("Your browser session expired. Enter the passphrase again."); return; }
@@ -1347,7 +1465,10 @@ async function loadSessions(){
     const data = await r.json();
     const sessions = Array.isArray(data) ? data : (data.sessions||data.data||[]);
     renderSessions(sessions);
-  }catch(e){ showError(el, "Failed to load sessions: "+(e.message||e)); }
+  }catch(e){
+    if(!hasExisting) showError(el, "Failed to load sessions: "+(e.message||e));
+    else setStatus("bad");
+  }
 }
 
 function renderSessions(sessions){
@@ -1362,6 +1483,7 @@ function renderSessions(sessions){
     if(q && !title.toLowerCase().includes(q) && !source.toLowerCase().includes(q)) continue;
     const div = document.createElement("div");
     div.className = "sess" + (s.id===activeId?" active":"");
+    div.dataset.sid = s.id;
     const titleNode = document.createElement("div");
     titleNode.className = "t";
     titleNode.textContent = title;
@@ -1422,13 +1544,30 @@ async function openSession(id, title){
   // correct for the session being opened. The aborted server turn keeps
   // running server-side and lands in history on next reload.
   if(streaming && currentAbort){ try{ currentAbort.abort(); }catch(e){} }
+  if(!isSidebarPinnedEffective()){
+    const s = document.getElementById("sidebar");
+    if(s) s.classList.remove("open");
+    toggleScrim(false);
+  }
   activeId = id;
   updateIdChip();
   document.getElementById("activeTitle").textContent = title || id;
+  document.querySelectorAll(".sess").forEach(x=>x.classList.toggle("active", x.dataset.sid === id));
   const inputEl = document.getElementById("input");
   if(inputEl){
     inputEl.value = loadDraft(id);
     updateRingState();
+  }
+  const isSessionSwitch = currentRenderedSessionId !== id;
+  if(isSessionSwitch){
+    currentRenderedSessionId = id;
+    const t = document.getElementById("thread");
+    const cached = sessionRenderCache.get(id);
+    if(cached && cached.length > 0){
+      renderThread(cached);
+    } else {
+      t.replaceChildren();
+    }
   }
   try{
     const r = await api("/api/sessions/"+encodeURIComponent(id)+"/messages");
@@ -1452,7 +1591,10 @@ async function openSession(id, title){
 
     applyContextFrom(data);
     const msgs = data.data || data.messages || (Array.isArray(data)?data:[]);
-    if(activeId === id) renderThread(msgs);
+    if(activeId === id){
+      renderThread(msgs);
+      reconcileDraftWithMessages(id, msgs);
+    }
   }catch(e){
     if(activeId === id){
       setStatus("bad");
@@ -1471,7 +1613,7 @@ async function openSession(id, title){
     }
   }
   if(activeId !== id) return;
-  document.querySelectorAll(".sess").forEach(x=>x.classList.remove("active"));
+  document.querySelectorAll(".sess").forEach(x=>x.classList.toggle("active", x.dataset.sid === id));
   await loadSessions();
 }
 
@@ -1592,7 +1734,7 @@ async function streamTurn(text, sessionId, opts={}){
     if(buf.trim()) handleFrame(buf, bubble);
   }catch(e){
     // If stream failed before delivery, preserve draft in storage and restore to input if empty
-    saveDraft(sessionId, text);
+    saveDraft(sessionId, text, turnId);
     const inputEl = document.getElementById("input");
     if(inputEl && !inputEl.value && activeId === sessionId){
       inputEl.value = text;
@@ -1632,9 +1774,14 @@ async function send(){
   }
   if(!activeId){ await newSession(); }
   if(!activeId) return;
+  let turnId = loadDraftTurnId(activeId);
+  if(!turnId){
+    turnId = generateUUID();
+    saveDraft(activeId, text, turnId);
+  }
   ta.value = "";
   updateRingState();
-  await streamTurn(text, activeId, {addUser:true});
+  await streamTurn(text, activeId, {addUser:true, turnId: turnId});
 }
 
 function stop(){
@@ -1642,6 +1789,7 @@ function stop(){
 }
 
 function handleFrame(frame, bubble){
+  if(frame.startsWith(":")) return;
   // Frames arriving for a session the user has switched away from are
   // dropped: their turn keeps running server-side and appears in history
   // on next reload. Without this, tool cards and deltas leak into the
@@ -1769,7 +1917,10 @@ function addMsg(role, text){
   return d;
 }
 function renderThread(msgs){
-  if(activeId) sessionRenderCache.set(activeId, Array.isArray(msgs) ? msgs.slice() : []);
+  if(activeId){
+    sessionRenderCache.set(activeId, Array.isArray(msgs) ? msgs.slice() : []);
+    currentRenderedSessionId = activeId;
+  }
   const t = document.getElementById("thread");
   t.replaceChildren();
 
@@ -1929,7 +2080,9 @@ function updateToolCard(cid, state, out, bubble){
 
 /* ---------- skills / toolsets ---------- */
 async function loadSkills(){
-  const el=document.getElementById("skillsList"); showLoading(el);
+  const el=document.getElementById("skillsList");
+  const hasExisting = el.querySelector(".card");
+  if(!hasExisting) showLoading(el);
   try{ const r=await api("/v1/skills"); if(!r.ok) throw new Error("HTTP "+r.status); const d=await r.json();
     const arr=Array.isArray(d)?d:(d.data||[]);
     el.replaceChildren();
@@ -1939,10 +2092,12 @@ async function loadSkills(){
       c.append(name, description);
       el.appendChild(c); }
     if(!arr.length) el.appendChild(messageElement("None reported."));
-  }catch(e){ showError(el, "Failed to load skills."); }
+  }catch(e){ if(!hasExisting) showError(el, "Failed to load skills."); }
 }
 async function loadTools(){
-  const el=document.getElementById("toolsList"); showLoading(el);
+  const el=document.getElementById("toolsList");
+  const hasExisting = el.querySelector(".card");
+  if(!hasExisting) showLoading(el);
   try{ const r=await api("/v1/toolsets"); if(!r.ok) throw new Error("HTTP "+r.status); const d=await r.json();
     const arr=Array.isArray(d)?d:(d.data||[]);
     el.replaceChildren();
@@ -1955,7 +2110,7 @@ async function loadTools(){
       if(tools){ const toolList=document.createElement("div"); toolList.className="tools"; toolList.textContent=tools; c.appendChild(toolList); }
       el.appendChild(c); }
     if(!arr.length) el.appendChild(messageElement("None reported."));
-  }catch(e){ showError(el, "Failed to load toolsets."); }
+  }catch(e){ if(!hasExisting) showError(el, "Failed to load toolsets."); }
 }
 
 /* ---------- diagnostics ---------- */
@@ -2271,7 +2426,7 @@ document.getElementById("input").addEventListener("keydown", e=>{
   }
 });
 document.getElementById("input").addEventListener("input", ()=>{
-  saveDraft(activeId, document.getElementById("input").value);
+  saveDraft(activeId, document.getElementById("input").value, "");
   updateRingState();
 });
 document.getElementById("newBtn").onclick = newSession;
@@ -2301,6 +2456,21 @@ function toggleScrim(on){ document.getElementById("scrim").classList.toggle("hid
 document.getElementById("tabSkills").onclick = ()=>{ document.getElementById("tabSkills").classList.add("on"); document.getElementById("tabTools").classList.remove("on"); document.getElementById("skillsList").classList.remove("hidden"); document.getElementById("toolsList").classList.add("hidden"); };
 document.getElementById("tabTools").onclick = ()=>{ document.getElementById("tabTools").classList.add("on"); document.getElementById("tabSkills").classList.remove("on"); document.getElementById("toolsList").classList.remove("hidden"); document.getElementById("skillsList").classList.add("hidden"); };
 document.getElementById("infoBtn").onclick = ()=>{ document.getElementById("settingsModal").classList.remove("hidden"); document.getElementById("cfgUrl").value=cfg.url||""; document.getElementById("cfgKey").value=""; runDiag(); };
+document.getElementById("pinSidebarBtn").onclick = toggleSidebarPin;
+try{
+  pinMatcher.addEventListener("change", ()=>{ applySidebarState(isSidebarPinnedPref(), false); });
+}catch(e){
+  try{ pinMatcher.addListener(()=>{ applySidebarState(isSidebarPinnedPref(), false); }); }catch(e){}
+}
+window.addEventListener("keydown", (e)=>{
+  if(e.key === "Escape" && !isSidebarPinnedEffective()){
+    const s = document.getElementById("sidebar");
+    if(s && s.classList.contains("open")){
+      s.classList.remove("open");
+      toggleScrim(false);
+    }
+  }
+});
 document.getElementById("settingsBtn").onclick = ()=>{ document.getElementById("settingsModal").classList.remove("hidden"); document.getElementById("cfgUrl").value=cfg.url||""; document.getElementById("cfgKey").value=cfg.key||""; runDiag(); };
 document.getElementById("cfgCancel").onclick = ()=> document.getElementById("settingsModal").classList.add("hidden");
 document.getElementById("cfgSave").onclick = ()=>{ cfg.url=document.getElementById("cfgUrl").value.trim(); cfg.key=document.getElementById("cfgKey").value.trim(); saveCfg(); document.getElementById("settingsModal").classList.add("hidden"); loadSessions(); };
