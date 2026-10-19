@@ -157,7 +157,7 @@ Render working / stalled / background / needs-input / unknown / stale states per
 
 1. **Coverage:** decided: B2-lite (§1.1). Re-open only if Electron/CLI-originated runs turn out to matter more than expected after Milestone 5.
 2. **More-menu contents:** default to Capabilities, Copy session ID, Refresh, and Skills/Tools, keeping Sessions/model selection/Send visible. Confirm only if one of those secondary actions should remain directly visible on a 320px screen.
-3. **Branching:** confirm the Hermes work goes on a feature branch in the fork (not upstream-tracking `main`) and that Uplink changes follow its existing commit style.
+3. **Branching:** decided: everything stays on the user's own forks, nothing is pushed or proposed upstream. Hermes commits go directly on the fork's `larry` branch, following the precedent of earlier Uplink-driven commits there (`feat(api): ...`); Uplink work sits on `feat/mobile-edge-ux-unread` for review before merging to `master`.
 
 ## 7. Revision log
 
@@ -178,7 +178,7 @@ Render working / stalled / background / needs-input / unknown / stale states per
 | 4 | Activity projection (B2-lite) | Hermes fork | new `gateway/platforms/api_session_status.py`; one-line hooks in `api_server.py`; `FORK.md` note | new tests in `tests/gateway/test_session_api.py` (scenarios in Milestone 4 gate); 200-row latency check | disable via capability flag / revert hook; Uplink shows nothing for absent field |
 | 5 | Working indicators (D2) + freshness poll | Uplink | `index.html`, pins | transitions, offline/stale, reduced-motion, narrow viewport checks | revert commit |
 
-**Progress (2026-10-20, uncommitted in both working trees):** Milestone 1 implemented and checked in headless Chromium at 320/390 portrait and 844×390 landscape plus desktop (no overflow, 44px targets on coarse pointers, More menu keyboard/Escape/focus-return, 7px dot). Milestone 2a implemented (`unread` on list/get/patch via new `SessionDB.get_session_unread`; 40/40 `tests/gateway/test_session_api.py` pass in a Linux Python 3.12 venv). Milestone 2b implemented and scripted-tested against a mocked API (unread badge, drawer dot, read-on-open, write guard, rate limit, failed PATCH, absent field, child filtering). Not yet exercised: a real Hermes gateway restart plus live cross-client check with Electron, and a physical phone. Milestones 3-5 not started.
+**Progress (2026-10-20, committed locally, nothing pushed):** Hermes `35a6dd36d7` on `larry`; Uplink `8e00d70` (header) and `4a48c37` (unread) on branch `feat/mobile-edge-ux-unread`. Milestone 1 implemented and checked in headless Chromium at 320/390 portrait and 844×390 landscape plus desktop (no overflow, 44px targets on coarse pointers, More menu keyboard/Escape/focus-return, 7px dot). Milestone 2a implemented (`unread` on list/get/patch via new `SessionDB.get_session_unread`; 40/40 `tests/gateway/test_session_api.py` pass in a Linux Python 3.12 venv). Milestone 2b implemented and scripted-tested against a mocked API (unread badge, drawer dot, read-on-open, write guard, rate limit, failed PATCH, absent field, child filtering). Not yet exercised: a real Hermes gateway restart plus live cross-client check with Electron, and a physical phone. Milestones 3-5 not started.
 
 Working rules: each milestone is its own commit (Hermes on a feature branch in the fork); Hermes gateway restart is needed after 2a and 4; do not start 5 before 4's gate passes; Kanban holds task-level execution status, this spec holds the contract.
 
