@@ -40,7 +40,8 @@
 
   .bar{display:flex; align-items:center; gap:8px; padding:10px; border-bottom:1px solid var(--border)}
   .bar h1{font-size:15px; margin:0; flex:1; letter-spacing:.3px}
-  .toolbtn{background:transparent; border:1px solid var(--border); width:40px; height:40px; padding:0; flex:none}
+  .toolbtn{background:transparent; border:1px solid var(--border); width:40px; height:40px; padding:0; flex:none;
+           display:inline-flex; align-items:center; justify-content:center; line-height:1}
   .new-chat-bar{border:none; padding:0 10px 6px}
   .new-chat-button{flex:1}
   .active-title{flex:1; font-size:13px; color:var(--muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
@@ -134,7 +135,7 @@
   .sysnote-b{padding:0 10px 8px; color:var(--muted)}
   .sysnote-b > :last-child{margin-bottom:0}
 
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--muted);display:inline-block;flex:none}
   .dot.run{background:var(--accent); animation:pulse 1s infinite}
   .dot.done{background:var(--green)}
   .dot.failed{background:var(--red)}
@@ -216,9 +217,51 @@
     #composer{ padding-bottom:calc(10px + env(safe-area-inset-bottom)) }
   }
 
+
+  /* ---- main header: one row on wide panes; two rows + More menu on narrow panes ----
+     Width is the *main pane* (container query), not the viewport: a phone in landscape
+     pins the sidebar and leaves a pane the viewport rules would misjudge. No inline
+     style attributes anywhere (CSP style-src-attr 'none'). */
+  #main > .bar{display:block; container-type:inline-size; container-name:mainbar}
+  .bar-inner{display:flex; align-items:center; gap:8px; min-width:0}
+  .bar-row{display:contents}
+  .modelchip .modelchip-body{display:flex; flex-direction:column; min-width:0; text-align:left}
+  .modelchip .modelchip-prov{display:none; font-size:10px; color:var(--muted); line-height:1.2; margin-top:2px;
+                             overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+  .moremenu-wrap{display:none; position:relative; flex:none}
+  .moremenu{position:absolute; right:0; top:calc(100% + 6px); min-width:210px; z-index:60; display:flex; flex-direction:column;
+            background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:4px;
+            box-shadow:0 8px 24px rgba(0,0,0,0.5)}
+  .moremenu button{border:none; background:transparent; text-align:left; border-radius:8px; padding:0 12px; min-height:44px}
+  .moremenu button:hover,.moremenu button:focus-visible{background:var(--bg3); outline:none}
+  .moremenu button:disabled{opacity:0.45; cursor:default}
+  @container mainbar (max-width:600px){
+    .bar-inner{flex-direction:column; align-items:stretch; gap:6px}
+    .bar-row{display:flex; align-items:center; gap:8px; min-width:0}
+    #infoBtn,#refreshBtn,#rightBtn,#idChip{display:none}
+    .moremenu-wrap{display:block}
+    .active-title{white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; line-height:1.3}
+    .modelchip{flex:1 1 auto; max-width:none; min-width:0; border-radius:12px; padding:6px 10px; align-items:flex-start}
+    .modelchip .modelchip-icon{margin-top:1px}
+    .modelchip .modelchip-text{white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;
+                               line-height:1.25; font-size:12px}
+    .modelchip .modelchip-prov{display:block}
+    @media (max-height:480px){
+      /* landscape phone / keyboard open: keep the thread tall - one compact row */
+      .bar-inner{flex-direction:row; align-items:center; gap:8px}
+      .bar-row{display:contents}
+      .active-title{-webkit-line-clamp:1}
+      .modelchip{flex:0 1 220px}
+      .modelchip .modelchip-prov{display:none}
+    }
+  }
+
   /* coarse-pointer (phone/tablet finger): bigger text, no resize handle */
   @media (pointer:coarse){
     body{font-size:16px}
+    .toolbtn{width:44px; height:44px}
+    .modelchip{min-height:44px}
+    .idchip{min-height:44px}
     .sess .t{font-size:15px}
     #composer textarea{resize:none}
   }
@@ -308,9 +351,6 @@
   #offlineBanner.hidden{display:none !important}
   #offlineBanner button{background:#1a1300; color:#fff; border:none; padding:3px 10px; border-radius:4px; font-size:11px; font-weight:600; cursor:pointer}
   #offlineBanner button:hover{background:#382700}
-  @media (max-width:600px){
-    .modelchip{max-width:120px}
-  }
 
 </style>
 </head>
@@ -327,7 +367,7 @@
           <path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1 0 .707c-.48.48-1.072.588-1.503.588-.177 0-.335-.018-.46-.039l-3.134 3.134a5.927 5.927 0 0 1 .16 1.013c.046.702-.032 1.687-.72 2.375a.5.5 0 0 1-.707 0l-2.829-2.828-3.182 3.182c-.195.195-1.219.909-1.34.788-.12-.12.593-1.146.788-1.34l3.182-3.183L2.947 7.21a.5.5 0 0 1 0-.707c.688-.688 1.673-.766 2.375-.72.348.022.688.072 1.013.16l3.134-3.133a2.772 2.772 0 0 1-.04-.461c0-.43.109-1.022.589-1.503a.5.5 0 0 1 .353-.146z"/>
         </svg>
       </button>
-      <button class="toolbtn" id="settingsBtn" title="Settings">&#9881;</button>
+      <button class="toolbtn" id="settingsBtn" title="Settings" aria-label="Settings">&#9881;</button>
     </div>
     <div id="search"><input id="searchInput" placeholder="Search sessions…" /></div>
     <div class="bar new-chat-bar">
@@ -338,18 +378,33 @@
 
   <div id="main">
     <div class="bar">
-      <button class="toolbtn" id="menuBtn" title="Sessions">&#9776;</button>
-      <button class="toolbtn" id="infoBtn" title="Capabilities">&#9432;</button>
-      <div class="active-title" id="activeTitle">No session — start or pick one</div>
-      <button class="modelchip" id="modelChip" type="button" title="Active Model — click to switch">
-        <span class="modelchip-icon">⚡</span><span class="modelchip-text" id="modelChipText">Model</span>
-      </button>
-      <button class="idchip hidden" id="idChip" type="button" title="Copy session ID">
-        <span class="idchip-glyph">&#128203;</span><span class="idchip-id"></span>
-      </button>
-      <span id="statusDot" class="dot" title="Connection status"></span>
-      <button class="toolbtn" id="refreshBtn" title="Refresh (or just switch to this tab)">&#8635;</button>
-      <button class="toolbtn" id="rightBtn" title="Skills / Tools">&#9881;</button>
+     <div class="bar-inner">
+      <div class="bar-row bar-primary">
+        <button class="toolbtn" id="menuBtn" title="Sessions" aria-label="Sessions">&#9776;</button>
+        <button class="toolbtn" id="infoBtn" title="Capabilities" aria-label="Capabilities">&#9432;</button>
+        <div class="active-title" id="activeTitle">No session — start or pick one</div>
+      </div>
+      <div class="bar-row bar-secondary">
+        <button class="modelchip" id="modelChip" type="button" title="Active Model — click to switch" aria-label="Model: choose model">
+          <span class="modelchip-icon" aria-hidden="true">⚡</span><span class="modelchip-body"><span class="modelchip-text" id="modelChipText">Model</span><span class="modelchip-prov" id="modelChipProv"></span></span>
+        </button>
+        <button class="idchip hidden" id="idChip" type="button" title="Copy session ID" aria-label="Copy session ID">
+          <span class="idchip-glyph" aria-hidden="true">&#128203;</span><span class="idchip-id"></span>
+        </button>
+        <span id="statusDot" class="dot" role="img" title="Connection status" aria-label="Connection status"></span>
+        <div class="moremenu-wrap" id="moreWrap">
+          <button class="toolbtn" id="moreBtn" type="button" title="More" aria-label="More actions" aria-haspopup="menu" aria-expanded="false" aria-controls="moreMenu">&#8943;</button>
+          <div class="moremenu hidden" id="moreMenu" role="menu" aria-label="More actions">
+            <button type="button" role="menuitem" data-target="infoBtn">Capabilities</button>
+            <button type="button" role="menuitem" data-target="idChip" id="moreCopyId">Copy session ID</button>
+            <button type="button" role="menuitem" data-target="refreshBtn">Refresh</button>
+            <button type="button" role="menuitem" data-target="rightBtn">Skills / Tools</button>
+          </div>
+        </div>
+        <button class="toolbtn" id="refreshBtn" title="Refresh (or just switch to this tab)" aria-label="Refresh">&#8635;</button>
+        <button class="toolbtn" id="rightBtn" title="Skills / Tools" aria-label="Skills and tools">&#128295;</button>
+      </div>
+     </div>
     </div>
     <div id="thread"><div class="empty-state">
       Pick a session on the left, or start a new chat.<br/>All sessions live on your home desktop.</div></div>
@@ -452,6 +507,11 @@ let currentAbort = null;
 const sessionRenderCache = new Map();
 let currentRenderedSessionId = null;
 const FINE_POINTER = window.matchMedia("(pointer: fine)").matches;
+if(!FINE_POINTER){
+  // Coarse pointer: Enter inserts a newline (Ctrl+Enter or the send button sends), so don't advertise Enter-to-send.
+  const _inp = document.getElementById("input");
+  if(_inp) _inp.placeholder = "Message the agent…";
+}
 
 /* ---------- Sidebar Pinning & Layout Engine ---------- */
 const PIN_STORAGE_KEY = "hermes-uplink-sidebar-pinned";
@@ -697,6 +757,7 @@ function setStatus(state){
   const d = document.getElementById("statusDot");
   d.className = "dot " + (state==="ok"?"done":state==="bad"?"run":"");
   d.title = state==="ok" ? "Connected" : state==="bad" ? "Reconnecting…" : "Connecting…";
+  d.setAttribute("aria-label", "Connection: " + d.title);
 }
 async function probe(){
   try{
@@ -1185,19 +1246,28 @@ function formatModelName(modelStr){
   const parts = String(modelStr).split("/");
   return parts[parts.length - 1];
 }
+// Allow the narrow (two-line) chip to wrap at meaningful boundaries only: after - _ . : in the name.
+function softWrapModelName(name){
+  return String(name).replace(/([-_.:])(?=[^-_.:])/g, "$1\u200b");
+}
 
 function updateModelChip(modelName, providerName){
   const chip = document.getElementById("modelChip");
   const textEl = document.getElementById("modelChipText");
+  const provEl = document.getElementById("modelChipProv");
   if(!chip || !textEl) return;
   const activeModel = modelName || cfg.defaultModel || (modelOptions && modelOptions.model);
   const activeProv = providerName || cfg.defaultProvider || (modelOptions && modelOptions.provider);
   if(activeModel){
-    textEl.textContent = formatModelName(activeModel);
+    textEl.textContent = softWrapModelName(formatModelName(activeModel));
     chip.title = "Active Model: " + activeModel + (activeProv ? " (" + activeProv + ")" : "") + (modelName ? "" : " [Default]") + "\nClick to switch";
+    if(provEl) provEl.textContent = (activeProv || "") + (modelName ? "" : (activeProv ? " · default" : "default"));
+    chip.setAttribute("aria-label", "Model " + activeModel + (activeProv ? ", provider " + activeProv : "") + (modelName ? "" : ", default") + ". Opens model picker");
   } else {
     textEl.textContent = "Model";
     chip.title = "Select Model / Provider";
+    if(provEl) provEl.textContent = "";
+    chip.setAttribute("aria-label", "Select model and provider");
   }
 }
 
@@ -1512,6 +1582,7 @@ function updateIdChip(){
   chip.classList.remove("hidden");
   idEl.textContent = activeId.length > 8 ? activeId.slice(-7) : activeId;
   chip.title = "Copy session ID: " + activeId;
+  chip.setAttribute("aria-label", "Copy session ID " + activeId);
 }
 function copyActiveId(){
   if(!activeId) return;
@@ -2447,6 +2518,41 @@ document.getElementById("rightBtn").onclick = ()=>{
 document.getElementById("menuBtn").onclick = ()=>{
   const s=document.getElementById("sidebar"); s.classList.toggle("open"); toggleScrim(s.classList.contains("open"));
 };
+/* ---- More menu (narrow header) ---- */
+(function(){
+  const btn = document.getElementById("moreBtn"), menu = document.getElementById("moreMenu");
+  if(!btn || !menu) return;
+  const items = ()=> Array.from(menu.querySelectorAll('[role="menuitem"]')).filter(b=>!b.disabled);
+  function close(returnFocus){
+    if(menu.classList.contains("hidden")) return;
+    menu.classList.add("hidden"); btn.setAttribute("aria-expanded", "false");
+    if(returnFocus) btn.focus();
+  }
+  function open(){
+    const copy = document.getElementById("moreCopyId");
+    copy.disabled = !activeId;   // idChip is hidden until a session is active
+    menu.classList.remove("hidden"); btn.setAttribute("aria-expanded", "true");
+    const first = items()[0]; if(first) first.focus();
+  }
+  btn.addEventListener("click", ()=>{ menu.classList.contains("hidden") ? open() : close(true); });
+  menu.addEventListener("click", (e)=>{
+    const item = e.target.closest("[data-target]"); if(!item || item.disabled) return;
+    const target = document.getElementById(item.dataset.target);
+    close(false);
+    if(!target) return;
+    target.click();
+    if(item.dataset.target === "idChip") showToast("Session ID copied", "success");
+  });
+  menu.addEventListener("keydown", (e)=>{
+    const list = items(), i = list.indexOf(document.activeElement);
+    if(e.key === "ArrowDown"){ e.preventDefault(); list[(i+1) % list.length].focus(); }
+    else if(e.key === "ArrowUp"){ e.preventDefault(); list[(i-1+list.length) % list.length].focus(); }
+    else if(e.key === "Escape"){ e.preventDefault(); e.stopPropagation(); close(true); }
+    else if(e.key === "Tab"){ close(false); }
+  });
+  document.addEventListener("pointerdown", (e)=>{ if(!menu.classList.contains("hidden") && !document.getElementById("moreWrap").contains(e.target)) close(false); });
+  window.addEventListener("resize", ()=> close(false));
+})();
 document.getElementById("scrim").onclick = ()=>{
   document.getElementById("sidebar").classList.remove("open");
   document.getElementById("right").classList.remove("open");
