@@ -68,6 +68,10 @@
   .sess .m{font-size:11px; color:var(--muted); margin-top:2px; display:flex; gap:6px; flex-wrap:wrap}
   .badge{font-size:10px; padding:1px 6px; border-radius:10px; background:var(--bg); border:1px solid var(--border); color:var(--muted)}
   .badge.live{color:var(--green); border-color:var(--green)}
+  .badge.unread{color:var(--green); border-color:var(--green); font-weight:600}
+  #menuBtn{position:relative}
+  #menuBtn.has-attn::after{content:""; position:absolute; top:5px; right:5px; width:10px; height:10px; border-radius:50%;
+                           background:var(--green); border:2px solid var(--bg)}
 
   #thread{flex:1; overflow:auto; padding:14px; display:flex; flex-direction:column; gap:12px}
   .msg{border-radius:10px; padding:10px 12px; max-width:92%; line-height:1.5}
@@ -1513,6 +1517,7 @@ async function refresh(){
     const msgs = d.data || d.messages || (Array.isArray(d)?d:[]);
     renderThread(msgs);
     reconcileDraftWithMessages(activeId, msgs);
+    markRead(activeId, "refresh");   // visible + freshly loaded; rate limited
   }catch(e){
     setStatus("bad");
   }finally{
@@ -1522,6 +1527,53 @@ async function refresh(){
 }
 document.addEventListener("visibilitychange", ()=>{ if(!document.hidden){ refresh(); probePendingClarify(); } });
 window.addEventListener("focus", ()=>{ refresh(); probePendingClarify(); });
+
+/* ---------- unread state (shared read watermark; see docs/mobile-edge-ux-and-session-status-spec.md) ---------- */
+// Backend: sessions rows carry `unread` (activity newer than the shared last_read_at); PATCH {unread:false} stamps it.
+// A just-written local value outranks a list page for UNREAD_WRITE_GUARD_MS (mirrors Electron's write guard) so a stale
+// page cannot flip a just-read session back to unread. Absent `unread` (older backend) renders nothing.
+const UNREAD_WRITE_GUARD_MS = 10000;
+const READ_MARK_MIN_INTERVAL_MS = 10000;
+const unreadGuard = new Map();   // id -> {value:boolean, at:ms}
+const lastReadMark = new Map();  // id -> ms of last write (rate limit for passive triggers)
+let lastSessionRows = [];
+function effectiveUnread(s){
+  const g = unreadGuard.get(s.id);
+  if(g && Date.now() - g.at < UNREAD_WRITE_GUARD_MS) return g.value;
+  return s.unread === true;
+}
+function updateDrawerDot(){
+  const btn = document.getElementById("menuBtn");
+  if(!btn) return;
+  const has = lastSessionRows.some(s=> s.id !== activeId && effectiveUnread(s));
+  btn.classList.toggle("has-attn", has);
+  btn.setAttribute("aria-label", has ? "Sessions — another session has unread messages" : "Sessions");
+}
+function clearRowUnread(id){
+  document.querySelectorAll(".sess").forEach(x=>{
+    if(x.dataset.sid !== id) return;
+    x.classList.remove("unread");
+    const b = x.querySelector(".badge.unread"); if(b) b.remove();
+  });
+}
+// reason: "open"/"completion" always write (user-visible acknowledgement); passive triggers are rate limited.
+async function markRead(id, reason){
+  if(!id || document.visibilityState !== "visible") return;
+  const passive = reason !== "open" && reason !== "completion";
+  const now = Date.now();
+  if(passive && (streaming || now - (lastReadMark.get(id) || 0) < READ_MARK_MIN_INTERVAL_MS)) return;
+  lastReadMark.set(id, now);
+  unreadGuard.set(id, {value:false, at:now});
+  clearRowUnread(id); updateDrawerDot();
+  try{
+    const r = await api("/api/sessions/"+encodeURIComponent(id), {
+      method:"PATCH", headers:{"Content-Type":"application/json"}, body: JSON.stringify({unread:false})
+    });
+    if(!r.ok) throw new Error("HTTP "+r.status);
+  }catch(e){
+    unreadGuard.delete(id); lastReadMark.delete(id);   // write failed: do not pretend it was read
+  }
+}
 
 /* ---------- sessions ---------- */
 async function loadSessions(){
@@ -1542,6 +1594,10 @@ async function loadSessions(){
 }
 
 function renderSessions(sessions){
+  // Internal delegate children are not ordinary conversations; the API marks them (is_internal_child).
+  sessions = sessions.filter(s=> !(s && s.is_internal_child === true));
+  lastSessionRows = sessions;
+  updateDrawerDot();
   const el = document.getElementById("sessionList");
   const q = (document.getElementById("searchInput").value||"").toLowerCase();
   el.replaceChildren();
@@ -1559,6 +1615,11 @@ function renderSessions(sessions){
     titleNode.textContent = title;
     const meta = document.createElement("div");
     meta.className = "m";
+    if(effectiveUnread(s)){
+      div.classList.add("unread");
+      const ub = badgeElement("unread", false); ub.classList.add("unread");
+      meta.appendChild(ub);
+    }
     meta.appendChild(badgeElement(source, false));
     if(s.active) meta.appendChild(badgeElement("live", true));
     const count = document.createElement("span");
@@ -1622,6 +1683,7 @@ async function openSession(id, title){
   }
   activeId = id;
   updateIdChip();
+  updateDrawerDot();
   document.getElementById("activeTitle").textContent = title || id;
   document.querySelectorAll(".sess").forEach(x=>x.classList.toggle("active", x.dataset.sid === id));
   const inputEl = document.getElementById("input");
@@ -1665,6 +1727,7 @@ async function openSession(id, title){
     if(activeId === id){
       renderThread(msgs);
       reconcileDraftWithMessages(id, msgs);
+      markRead(id, "open");   // only after history loaded successfully
     }
   }catch(e){
     if(activeId === id){
