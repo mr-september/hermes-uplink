@@ -11,5 +11,8 @@ __pycache__/
 # Local experiments
 scratch/
 
+# Local archives: dated backups kept out of git (see archive/<date>/)
+archive/
+
 # Design source files (do not commit; keep the rendered PNGs under assets/)
 assets/*.psd

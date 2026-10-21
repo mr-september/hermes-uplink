@@ -55,13 +55,13 @@ PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 # reviewed change as the corresponding static asset; startup then fails closed
 # if the deployed files drift.
 PINNED_ASSET_HASHES = {
-    "index.html": "JZGyg4lX/WYir9ZT3uaYol4oFeAOPKdHHINLP+ZRMsQ=",
+    "index.html": "e4NtR/g+oVpfmn5w35HzHXUR7zWu67Y19hK2k7wQYOo=",
     "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
     "sw.js": "KN3cJrmqGrA4FoLawEWBBDZfXIR7rX66PcM3M4u/eAo=",
 }
 
-INLINE_SCRIPT_HASH = "0Bp70IlbHE83c/bfrVG1cuukd0gQzt+eNkTKCjupLE0="
-INLINE_STYLE_HASH = "CUWWMRtY/yzcf1YTls0dXq6o6KVC2fw29MJ5jL7BGEA="
+INLINE_SCRIPT_HASH = "Lw0e4407oeKjf1+jmBoZPJ7Tc9tHWQO0/6D/LvavLgg="
+INLINE_STYLE_HASH = "MVi1o8Z/hb2syaZzKQLUm9ftMdctnQzpeak4ytfgEYc="
 TEXT_ASSETS = frozenset(("index.html", "sw.js"))
 
 
@@ -565,7 +565,8 @@ class Handler(BaseHTTPRequestHandler):
             url = UPSTREAM + path
             data = body if body else (b"" if method in ("POST", "PUT", "PATCH") else None)
             request = urllib.request.Request(url, data=data, method=method)
-            for name in ("Content-Type", "Accept", "Last-Event-ID", "Idempotency-Key", "X-Client-Turn-ID"):
+            for name in ("Content-Type", "Accept", "Last-Event-ID", "Idempotency-Key", "X-Client-Turn-ID",
+                         "X-Hermes-Client-Capabilities", "X-Hermes-Session-Key"):
                 value = self.headers.get(name)
                 if value:
                     request.add_header(name, value)
