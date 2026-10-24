@@ -4,7 +4,7 @@ param(
     [int]$Port = 8787
 )
 
-$pidFile = Join-Path $PSScriptRoot ".uplink.pid"
+$pidFile = Join-Path (Split-Path $PSScriptRoot -Parent) ".uplink.pid"
 if (-not (Test-Path -LiteralPath $pidFile)) {
     if ($Action -eq "status") { Write-Output "[!] Not running (run: launch_local.bat start)" }
     else { Write-Output "[!] Not running." }
@@ -20,12 +20,12 @@ if (-not [int]::TryParse($rawPid, [ref]$targetPid) -or $targetPid -le 0) {
 
 $process = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid"
 $commandLine = if ($process) { [string]$process.CommandLine } else { "" }
-$scriptPattern = '(?i)(^|\s)["'']?proxy\.py["'']?(\s|$)'
-$portPattern = '(?i)--port\s+["'']?' + [regex]::Escape([string]$Port) + '["'']?(\s|$)'
+$scriptPattern = '(?i)(^|[\s\\/"''])proxy\.py["'']?(\s|$)'
+$listening = Get-NetTCPConnection -State Listen -LocalPort $Port -OwningProcess $targetPid -ErrorAction SilentlyContinue
 $isHermesProxy = $process -and
     $process.Name -match '^(pythonw?|py)(\.exe)?$' -and
     $commandLine -match $scriptPattern -and
-    $commandLine -match $portPattern
+    $listening
 if (-not $isHermesProxy) {
     if ($Action -eq "status") { Write-Output "[!] Not running (run: launch_local.bat start)" }
     else { Write-Output "[!] Refused to stop a process that was not identified as Hermes Uplink." }

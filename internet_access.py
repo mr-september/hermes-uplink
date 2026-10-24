@@ -24,11 +24,21 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import urlsplit
 import webbrowser
 
-from console_utils import enable_console_selection
-from uplink_common import DEFAULT_PORT, DEFAULT_UPSTREAM, HEALTH_PROBE_HEADER, HEALTH_PROBE_VALUE
+from uplink_common import (
+    DEFAULT_PORT,
+    DEFAULT_UPSTREAM,
+    HEALTH_PROBE_HEADER,
+    HEALTH_PROBE_VALUE,
+    PASS_FILE,
+    PASS_PATTERN,
+    ROOT,
+    SettingsError,
+    enable_console_selection,
+    parse_port,
+    read_credential,
+)
 
 
-ROOT = Path(__file__).resolve().parent
 TAILSCALE_INSTALL_URL = "https://tailscale.com/download/windows"
 PUBLIC_PORT = 443
 LOCAL_TARGET_HOST = "127.0.0.1"
@@ -482,12 +492,8 @@ def ensure_local_proxy(
 
 
 def load_passphrase(root: Path = ROOT) -> str:
-    path = root / ".uplink-pass.txt"
-    try:
-        value = path.read_text(encoding="ascii").strip()
-    except OSError as exc:
-        raise InternetAccessError("Run launch_local.bat first so the Uplink passphrase exists.") from exc
-    if not re.fullmatch(r"[A-Za-z0-9]{20,}", value):
+    value = read_credential(PASS_FILE, PASS_PATTERN, root)
+    if value is None:
         raise InternetAccessError("The Uplink passphrase is missing or invalid; run launch_local.bat first.")
     return value
 
@@ -556,8 +562,6 @@ def ensure_funnel_route(client: TailscaleClient, port: int) -> FunnelRoute:
 
 
 def require_owned_route(routes: Sequence[FunnelRoute], port: int) -> FunnelRoute:
-    if not routes:
-        raise InternetAccessError("No matching Uplink Funnel route was found.")
     route = matching_uplink_route(routes, port)
     if route is None:
         raise InternetAccessError(
@@ -654,13 +658,6 @@ def cleanup_access(port: int, assume_yes: bool = False) -> int:
     return 0
 
 
-def _port_from_environment() -> int:
-    raw = os.environ.get("HERMES_PORT", str(DEFAULT_PORT))
-    if not raw.isdigit() or not 1 <= int(raw) <= 65535:
-        raise InternetAccessError("HERMES_PORT must be a decimal TCP port from 1 through 65535.")
-    return int(raw)
-
-
 def _menu(port: int) -> int:
     while True:
         print()
@@ -709,9 +706,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--yes", action="store_true", help="Do not prompt for cleanup confirmation.")
     args = parser.parse_args(argv)
     try:
-        port = _port_from_environment() if args.port is None else args.port
-        if not 1 <= port <= 65535:
-            raise InternetAccessError("--port must be from 1 through 65535.")
+        port = parse_port(str(args.port) if args.port is not None else os.environ.get("HERMES_PORT", str(DEFAULT_PORT)))
         if args.command == "start":
             return start_access(port)
         if args.command == "status":
@@ -722,7 +717,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\n[*] Cancelled.")
         return 130
-    except InternetAccessError as exc:
+    except (InternetAccessError, SettingsError) as exc:
         print(f"[!] {exc}")
         return 1
 

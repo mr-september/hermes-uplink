@@ -2,7 +2,6 @@
 .uplink-key.txt
 .uplink-pass.txt
 .uplink.pid
-.verify_cookie.txt
 
 # Python
 __pycache__/
@@ -11,8 +10,5 @@ __pycache__/
 # Local experiments
 scratch/
 
-# Local archives: dated backups kept out of git (see archive/<date>/)
-archive/
-
-# Design source files (do not commit; keep the rendered PNGs under assets/)
-assets/*.psd
+# Design source files (do not commit; keep the rendered PNGs under web/assets/)
+web/assets/*.psd

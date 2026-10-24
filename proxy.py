@@ -25,8 +25,18 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import BoundedSemaphore, Lock, Semaphore, Thread
 
-from console_utils import enable_console_selection
-from uplink_common import DEFAULT_PORT, DEFAULT_UPSTREAM, HEALTH_PROBE_HEADER, HEALTH_PROBE_VALUE
+from uplink_common import (
+    DEFAULT_PORT,
+    DEFAULT_UPSTREAM,
+    HEALTH_PROBE_HEADER,
+    HEALTH_PROBE_VALUE,
+    KEY_FILE,
+    KEY_PATTERN,
+    PASS_FILE,
+    PASS_PATTERN,
+    enable_console_selection,
+    read_credential,
+)
 
 
 UPSTREAM = DEFAULT_UPSTREAM
@@ -48,16 +58,17 @@ FORWARDED_HEADERS = (
     "X-Hermes-Client-Capabilities", "X-Hermes-Session-Key",
 )
 HERE = os.path.dirname(os.path.abspath(__file__))
+WEB = os.path.join(HERE, "web")
 PID_FILE = os.path.join(HERE, ".uplink.pid")
 API_KEY = os.environ.get("HERMES_API_KEY", "")
 PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 
 # Static assets are authorized by pinned digests, not by whatever happens to be on
-# disk. `python proxy.py --update-hashes` rewrites pinned-hashes.json (and the SRI
+# disk. `python proxy.py --update-hashes` rewrites web/pinned-hashes.json (and the SRI
 # digests in index.html) as part of the same reviewed change as the asset edit;
 # startup fails closed if a served file drifts. Text assets are hashed and served
 # with line endings normalized to LF, so a CRLF checkout does not break SRI.
-PINNED_HASHES_FILE = os.path.join(HERE, "pinned-hashes.json")
+PINNED_HASHES_FILE = os.path.join(WEB, "pinned-hashes.json")
 PINNED_FILES = ("index.html", "app.js", "app.css", "vendor/marked.umd.js", "sw.js")
 SCRIPT_FILES = ("app.js", "vendor/marked.umd.js")   # loaded by index.html with SRI; allowed by CSP via the same digest
 STATIC_FILES = {
@@ -94,7 +105,7 @@ def _read_file(full_path):
 
 def _read_asset(relative_path):
     try:
-        return _read_file(os.path.join(HERE, relative_path))
+        return _read_file(os.path.join(WEB, relative_path))
     except OSError as error:
         raise RuntimeError(f"required static asset is unavailable: {relative_path}") from error
 
@@ -146,7 +157,7 @@ def validate_pinned_assets():
 
 def update_pinned_hashes():
     """Recompute digests, refresh index.html's SRI attributes, and rewrite pinned-hashes.json."""
-    html_path = os.path.join(HERE, "index.html")
+    html_path = os.path.join(WEB, "index.html")
     script_digests = {src: _sha256_base64(src) for src in SCRIPT_FILES}
     html = _read_asset("index.html").decode("utf-8")
     html = SCRIPT_TAG_RE.sub(
@@ -226,16 +237,16 @@ def validate_upstream(url, allow_remote=False):
 
 
 def resolve_static(path):
-    """Map a request path to an allowed static file under HERE, or None."""
+    """Map a request path to an allowed static file under web/, or None."""
     exact = STATIC_FILES.get(path)
     if exact:
-        return os.path.join(HERE, exact)
+        return os.path.join(WEB, exact)
     relative = urllib.parse.unquote(path.lstrip("/"))
     directory = relative.split("/", 1)[0]
     if directory not in STATIC_DIRS:
         return None
-    base = os.path.realpath(os.path.join(HERE, directory))
-    full = os.path.realpath(os.path.join(HERE, relative))
+    base = os.path.realpath(os.path.join(WEB, directory))
+    full = os.path.realpath(os.path.join(WEB, relative))
     try:
         inside = os.path.commonpath((full, base)) == base
     except ValueError:
@@ -631,12 +642,12 @@ def _remove_pid():
 
 
 def main():
-    global UPSTREAM
+    global UPSTREAM, API_KEY, PASS
     parser = argparse.ArgumentParser(description="Hermes Uplink local proxy")
     parser.add_argument(
         "--update-hashes",
         action="store_true",
-        help="recalculate static asset SHA-256 digests; rewrites pinned-hashes.json and index.html's SRI attributes",
+        help="recalculate static asset SHA-256 digests; rewrites web/pinned-hashes.json and web/index.html's SRI attributes",
     )
     parser.add_argument(
         "--check-hashes",
@@ -659,7 +670,7 @@ def main():
     args = parser.parse_args()
 
     if args.update_hashes:
-        print("[+] Pinned digests updated (pinned-hashes.json, index.html SRI):")
+        print("[+] Pinned digests updated (web/pinned-hashes.json, web/index.html SRI):")
         for path, digest in update_pinned_hashes().items():
             print(f"    {path}: {digest}")
         return
@@ -684,10 +695,12 @@ def main():
         upstream = validate_upstream(args.upstream, args.allow_remote_upstream)
     except ValueError as error:
         parser.error(str(error))
+    API_KEY = API_KEY or read_credential(KEY_FILE, KEY_PATTERN)
+    PASS = PASS or read_credential(PASS_FILE, PASS_PATTERN)
     if not API_KEY:
-        parser.error("HERMES_API_KEY is required")
+        parser.error(f"set HERMES_API_KEY or provide a valid {KEY_FILE} (run launch_local.bat)")
     if not PASS:
-        parser.error("UPLINK_PASSPHRASE is required")
+        parser.error(f"set UPLINK_PASSPHRASE or provide a valid {PASS_FILE} (run launch_local.bat)")
     validate_pinned_assets()
 
     UPSTREAM = upstream
