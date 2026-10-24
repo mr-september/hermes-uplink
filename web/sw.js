@@ -1,6 +1,7 @@
-// hermes-uplink service worker.
-// Caches manifest and worker for PWA installation.
-// index.html is intentionally not cached to prevent stale states on reload.
+// hermes-uplink service worker. Its main job is making the app installable (PWA); it keeps
+// no offline shell. Only the manifest, this worker and the vendored markdown parser are
+// cached; index.html, app.js, app.css and API calls always go to the network, so a
+// reload never serves a stale UI.
 const CACHE = "uplink-shell-v2";
 const SHELL = ["/manifest.webmanifest", "/sw.js", "/vendor/marked.umd.js"];
 

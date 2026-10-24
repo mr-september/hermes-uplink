@@ -242,7 +242,7 @@ class ProxyIntegrationTests(unittest.TestCase):
                 proxy.validate_pinned_assets()
 
     def test_text_asset_integrity_is_line_ending_independent(self):
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[1] / "web"
         for relative_path in ("index.html", "app.js", "app.css", "sw.js"):
             raw = (root / relative_path).read_bytes()
             canonical = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")

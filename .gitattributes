@@ -1,8 +1,7 @@
-# Normalize line endings on checkout/commit.
-# CRLF is required for Windows batch and VBScript to run reliably.
+# Everything is LF in the repository and in the working tree...
+* text=auto eol=lf
+
+# ...except Windows batch and VBScript, which need CRLF to run reliably.
+# (Later patterns win, so this block must stay below the catch-all.)
 *.bat text eol=crlf
 *.vbs text eol=crlf
-
-# Everything else uses LF in the repository; Git applies the
-# platform-appropriate ending on checkout.
-* text=auto eol=lf

@@ -1,4 +1,14 @@
 const $ = (id) => document.getElementById(id);
+// localStorage can throw (private browsing, blocked site data); persistence is best-effort throughout.
+const store = {
+  get(key){ try{ return localStorage.getItem(key); }catch{ return null; } },
+  set(key, value){ try{ localStorage.setItem(key, value); }catch{} },
+  remove(key){ try{ localStorage.removeItem(key); }catch{} },
+};
+// JSON.parse that returns null instead of throwing.
+function parseJson(text){
+  try{ return JSON.parse(text); }catch{ return null; }
+}
 const LS_KEY = "hermes-uplink-cfg";
 let cfg = loadCfg();
 let activeId = null;
@@ -31,11 +41,8 @@ function canPinSidebar(){
 }
 
 function isSidebarPinnedPref(){
-  try{
-    const stored = localStorage.getItem(PIN_STORAGE_KEY);
-    if(stored !== null) return stored === "true";
-  }catch(e){}
-  return window.innerWidth >= 1024;
+  const stored = store.get(PIN_STORAGE_KEY);
+  return stored !== null ? stored === "true" : window.innerWidth >= 1024;
 }
 
 function isSidebarPinnedEffective(){
@@ -64,7 +71,7 @@ function toggleSidebarPin(){
   if(!canPinSidebar()) return;
   const current = document.body.classList.contains("sidebar-pinned");
   const next = !current;
-  try{ localStorage.setItem(PIN_STORAGE_KEY, String(next)); }catch(e){}
+  store.set(PIN_STORAGE_KEY, String(next));
   applySidebarState(next, !next);
 }
 
@@ -85,23 +92,17 @@ function generateUUID(){
 function draftKey(sessId){ return "hermes-uplink-draft-" + (sessId || "global"); }
 function draftTurnKey(sessId){ return "hermes-uplink-turn-" + (sessId || "global"); }
 function saveDraft(sessId, val, turnId){
-  try{
-    if(val && val.trim()){
-      localStorage.setItem(draftKey(sessId), val);
-      if(turnId) localStorage.setItem(draftTurnKey(sessId), turnId);
-      else if(turnId === "") localStorage.removeItem(draftTurnKey(sessId));
-    }else{
-      localStorage.removeItem(draftKey(sessId));
-      localStorage.removeItem(draftTurnKey(sessId));
-    }
-  }catch(e){}
+  if(val && val.trim()){
+    store.set(draftKey(sessId), val);
+    if(turnId) store.set(draftTurnKey(sessId), turnId);
+    else if(turnId === "") store.remove(draftTurnKey(sessId));
+  }else{
+    store.remove(draftKey(sessId));
+    store.remove(draftTurnKey(sessId));
+  }
 }
-function loadDraft(sessId){
-  try{ return localStorage.getItem(draftKey(sessId)) || ""; }catch(e){ return ""; }
-}
-function loadDraftTurnId(sessId){
-  try{ return localStorage.getItem(draftTurnKey(sessId)) || ""; }catch(e){ return ""; }
-}
+function loadDraft(sessId){ return store.get(draftKey(sessId)) || ""; }
+function loadDraftTurnId(sessId){ return store.get(draftTurnKey(sessId)) || ""; }
 function reconcileDraftWithMessages(sessId, msgs){
   if(!sessId || !Array.isArray(msgs) || msgs.length === 0) return;
   const draft = loadDraft(sessId).trim();
@@ -137,19 +138,15 @@ function showOfflineBanner(show, msg){
 }
 
 function loadCfg(){
-  try{
-    const value = JSON.parse(localStorage.getItem(LS_KEY));
-    if(!value || typeof value !== "object") return {};
-    if("key" in value || "url" in value){    // direct mode was removed: purge any stored API key
-      delete value.key; delete value.url;
-      try{ localStorage.setItem(LS_KEY, JSON.stringify(value)); }catch{}
-    }
-    return value;
-  }catch{ return {} }
+  const value = parseJson(store.get(LS_KEY));
+  if(!value || typeof value !== "object") return {};
+  if("key" in value || "url" in value){    // direct mode was removed: purge any stored API key
+    delete value.key; delete value.url;
+    store.set(LS_KEY, JSON.stringify(value));
+  }
+  return value;
 }
-function saveCfg(){
-  try{ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }catch{}
-}
+function saveCfg(){ store.set(LS_KEY, JSON.stringify(cfg)); }
 async function api(path, opts={}){
   return fetch(path, Object.assign({}, opts, {credentials:"same-origin"}));
 }
@@ -222,6 +219,7 @@ async function submitAuth(){
 $("authSubmit").onclick = submitAuth;
 $("authInput").addEventListener("keydown", e=>{ if(e.key==="Enter") submitAuth(); });
 async function logout(){
+  // Best effort: reload either way; the login gate shows if the session survived.
   try{ await fetch("/__logout", {method:"POST", credentials:"same-origin"}); }catch{}
   window.location.reload();
 }
@@ -420,12 +418,10 @@ function otherTextarea(placeholder, rows){
 function formatClarifyAnswer(value){
   let text = String(value);
   if(text.startsWith("[") || text.startsWith("{")){
-    try{
-      let parsed = JSON.parse(text);
-      if(parsed && typeof parsed === "object" && parsed.answers && typeof parsed.answers === "object") parsed = parsed.answers;
-      if(Array.isArray(parsed)) text = parsed.join(", ");
-      else if(parsed && typeof parsed === "object") text = Object.entries(parsed).map(([k, v])=>`${k}: ${v}`).join("; ");
-    }catch{}
+    let parsed = parseJson(text);
+    if(parsed && typeof parsed === "object" && parsed.answers && typeof parsed.answers === "object") parsed = parsed.answers;
+    if(Array.isArray(parsed)) text = parsed.join(", ");
+    else if(parsed && typeof parsed === "object") text = Object.entries(parsed).map(([k, v])=>`${k}: ${v}`).join("; ");
   }
   return text;
 }
@@ -681,8 +677,8 @@ function buildClarifyBatch(card, payload, meta){
       else {
         const bares = q.choices.map(stripRecommended);
         if(q.multi){
-          let arr = null;
-          try{ const p = JSON.parse(String(lv)); if(Array.isArray(p)) arr = p.map(String); }catch{}
+          const p = parseJson(String(lv));
+          const arr = Array.isArray(p) ? p.map(String) : null;
           const rest = [];
           (arr || [String(lv)]).forEach(v=>{ if(bares.includes(v)) st.multi.add(v); else rest.push(v); });
           st.text = rest.join(", ");
@@ -795,7 +791,7 @@ function buildClarifyBatch(card, payload, meta){
     const ae = document.activeElement;
     if(ae && (ae.tagName === "TEXTAREA" || ae.tagName === "INPUT") && ae.value) return;
     const first = qs.find(q=>valueOf(q) === null && !S[q.qid].skipped) || qs[0];
-    try{ U[first.qid].sec.focus(); }catch{}
+    U[first.qid].sec.focus();
   };
 }
 
@@ -1043,7 +1039,7 @@ async function probePendingClarify(){
         }
       }
     }
-  }catch{}
+  }catch{ /* background probe: the next focus or watchdog tick retries */ }
 }
 /* ---------- model & provider selection ---------- */
 const MODEL_CACHE_KEY = "hermes-uplink-model-options";
@@ -1052,12 +1048,8 @@ let currentSessionModel = null;
 let currentSessionProvider = null;
 
 function loadCachedModelOptions(){
-  try{
-    const raw = localStorage.getItem(MODEL_CACHE_KEY);
-    if(raw){
-      modelOptions = JSON.parse(raw);
-    }
-  }catch(e){}
+  const cached = parseJson(store.get(MODEL_CACHE_KEY));
+  if(cached && typeof cached === "object") modelOptions = cached;
 }
 
 async function fetchModelOptions(force = false){
@@ -1070,7 +1062,7 @@ async function fetchModelOptions(force = false){
     const data = await r.json();
     if(data && typeof data === "object"){
       modelOptions = data;
-      try{ localStorage.setItem(MODEL_CACHE_KEY, JSON.stringify(data)); }catch(e){}
+      store.set(MODEL_CACHE_KEY, JSON.stringify(data));
       updateModelChip(currentSessionModel, currentSessionProvider);
       const modal = $("modelModal");
       if(modal && !modal.classList.contains("hidden")){
@@ -1555,25 +1547,31 @@ function sessionTitleOf(sid){
   return (t && t.textContent) || sid;
 }
 
+// Session detail (context usage, model); null when unavailable, since it only decorates the history.
+async function fetchSessionDetail(id){
+  try{
+    const r = await api("/api/sessions/"+encodeURIComponent(id));
+    if(!r.ok) return null;
+    const detail = await r.json();
+    return detail.session || detail;
+  }catch{ return null; }
+}
+
 // History + context + model for a session, merged into one object (does not touch the thread).
 async function fetchHistory(id){
   const r = await api("/api/sessions/"+encodeURIComponent(id)+"/messages");
   if(!r.ok) throw new Error("HTTP "+r.status);
   const data = await r.json();
-  try {
-    const detailRes = await api("/api/sessions/"+encodeURIComponent(id));
-    if(detailRes.ok && activeId === id){
-      const detail = await detailRes.json();
-      const sessObj = detail.session || detail;
-      const used = num(sessObj.context_used ?? sessObj.contextTokens);
-      const limit = num(sessObj.context_limit ?? sessObj.context_window ?? sessObj.contextWindow ?? sessObj.max_tokens);
-      const occ = (typeof sessObj.occupancy_pct === "number") ? sessObj.occupancy_pct : null;
-      if(limit > 0 && used > 0) { data.context_used = used; data.context_limit = limit; if(occ != null) data.occupancy_pct = occ; }
-      currentSessionModel = sessObj.model || null;
-      currentSessionProvider = sessObj.provider || null;
-      updateModelChip(currentSessionModel, currentSessionProvider);
-    }
-  }catch(e){}
+  const sessObj = await fetchSessionDetail(id);
+  if(sessObj && activeId === id){
+    const used = num(sessObj.context_used ?? sessObj.contextTokens);
+    const limit = num(sessObj.context_limit ?? sessObj.context_window ?? sessObj.contextWindow ?? sessObj.max_tokens);
+    const occ = (typeof sessObj.occupancy_pct === "number") ? sessObj.occupancy_pct : null;
+    if(limit > 0 && used > 0) { data.context_used = used; data.context_limit = limit; if(occ != null) data.occupancy_pct = occ; }
+    currentSessionModel = sessObj.model || null;
+    currentSessionProvider = sessObj.provider || null;
+    updateModelChip(currentSessionModel, currentSessionProvider);
+  }
   return data;
 }
 
@@ -1864,7 +1862,8 @@ async function send(){
     if(prevCard && prevCard._batch && prevCard.classList.contains("pending")){
       // A batch is never answered by typed text (the gateway does not take it as an answer either): point at the card.
       showToast("Answer or cancel the questions first. Your message is kept.");
-      try{ (prevCard.querySelector(".clarify-qcard:not(.answered):not(.skipped)") || prevCard.querySelector(".clarify-qcard")).focus(); }catch{}
+      const target = prevCard.querySelector(".clarify-qcard:not(.answered):not(.skipped)") || prevCard.querySelector(".clarify-qcard");
+      if(target) target.focus();
       return;
     }
     // Typing in the composer while a single question is pending = skip it (the agent decides).
@@ -1892,9 +1891,7 @@ async function send(){
 // Best effort: ask the server to stop the run too (aborting the fetch alone leaves it running).
 function postRunStop(rid, keepalive){
   if(!rid) return;
-  try{
-    api("/v1/runs/"+encodeURIComponent(rid)+"/stop", {method:"POST", keepalive: !!keepalive}).catch(()=>{});
-  }catch(e){}
+  api("/v1/runs/"+encodeURIComponent(rid)+"/stop", {method:"POST", keepalive: !!keepalive}).catch(()=>{});   // best effort
 }
 function stopRun(keepalive){ postRunStop(activeRunId, !!keepalive); }
 function stop(keepalive){
@@ -1906,7 +1903,7 @@ function stopAll(keepalive){
   for(const S of streams.values()){
     if(!S.running) continue;
     postRunStop(S.runId, keepalive);
-    try{ S.abort.abort(); }catch(e){}
+    S.abort.abort();
   }
 }
 
@@ -1951,7 +1948,7 @@ function handleFrame(frame, bubble){
       data += (data ? "\n" : "") + value;
     }
   }
-  let obj=null; try{ obj = JSON.parse(data) }catch{}
+  const obj = parseJson(data);
   if(obj && typeof obj.run_id === "string" && obj.run_id){
     if(S) S.runId = obj.run_id;
     if(fg) activeRunId = obj.run_id;
@@ -2298,7 +2295,8 @@ function formatPayload(x){
   if(typeof x === "string"){
     const trimmed = x.trim();
     if((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))){
-      try{ return JSON.stringify(JSON.parse(trimmed), null, 2); }catch{}
+      const parsed = parseJson(trimmed);
+      if(parsed !== null) return JSON.stringify(parsed, null, 2);
     }
     return x;
   }
@@ -2531,7 +2529,7 @@ function safeHref(value){
   try{
     const url=new URL(raw, document.baseURI);
     if(["http:","https:","mailto:"].includes(url.protocol)) return url.href;
-  }catch{}
+  }catch{ /* unparseable URL: fall through to null */ }
   return null;
 }
 function secureHtml(html){
@@ -2721,7 +2719,7 @@ window.addEventListener("offline", () => {
   showOfflineBanner(true, "⚠️ Offline — Internet connection lost");
 });
 window.addEventListener("pagehide", () => {
-  try { stopAll(true); } catch {}
+  stopAll(true);
 });
 
 /* message-action delegation (desktop hover buttons + mobile layout) */
