@@ -122,17 +122,11 @@
   <div class="modal hidden" id="settingsModal">
     <div class="box">
       <h3 class="modal-title">Connection</h3>
-      <div class="modal-subtitle">Leave Server URL empty to use same-origin (proxy mode).</div>
-      <label>Server base URL (e.g. https://hermes.example.com or http://127.0.0.1:8642)</label>
-      <input id="cfgUrl" placeholder="(same origin)" />
-      <label>API key (Bearer) — only needed in direct mode</label>
-      <input id="cfgKey" type="password" placeholder="(injected by proxy in same-origin mode)" />
       <div class="diag" id="diag"></div>
        <div class="modal-actions">
          <button id="diagBtn">Test</button>
          <button id="logoutBtn">Log out</button>
-         <button id="cfgCancel">Cancel</button>
-         <button class="primary" id="cfgSave">Save</button>
+         <button class="primary" id="settingsClose">Close</button>
        </div>
     </div>
   </div>
@@ -156,6 +150,6 @@
 
 <!-- vendored offline markdown renderer (no CDN); from marked v17 (MIT) -->
 <script src="vendor/marked.umd.js" integrity="sha256-AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=" crossorigin="anonymous"></script>
-<script src="app.js" integrity="sha256-uX8AlU9dXmZd5Mse/RyldlXt7JpMuMZ7/xrek5EH114=" crossorigin="anonymous"></script>
+<script src="app.js" integrity="sha256-dL+Lv86PwT6+S7QceBE+y8botZ+JobiDQmhZCE+wvfM=" crossorigin="anonymous"></script>
 </body>
 </html>

@@ -139,31 +139,19 @@ function showOfflineBanner(show, msg){
 function loadCfg(){
   try{
     const value = JSON.parse(localStorage.getItem(LS_KEY));
-    return value && typeof value === "object" ? value : {};
+    if(!value || typeof value !== "object") return {};
+    if("key" in value || "url" in value){    // direct mode was removed: purge any stored API key
+      delete value.key; delete value.url;
+      try{ localStorage.setItem(LS_KEY, JSON.stringify(value)); }catch{}
+    }
+    return value;
   }catch{ return {} }
 }
 function saveCfg(){
   try{ localStorage.setItem(LS_KEY, JSON.stringify(cfg)); }catch{}
 }
-function connectionBase(){
-  const raw = (cfg.url||"").trim();
-  const url = new URL(raw || window.location.origin, window.location.origin);
-  if(url.username || url.password) throw new Error("Server URL must not contain credentials.");
-  const localHttp = url.protocol === "http:" && ["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname);
-  if(url.protocol !== "https:" && url.origin !== window.location.origin && !localHttp){
-    throw new Error("External Server URL must use HTTPS.");
-  }
-  return url.href.replace(/\/+$/,"");
-}
-function externalMode(){
-  return new URL(connectionBase(), window.location.origin).origin !== window.location.origin;
-}
-
 async function api(path, opts={}){
-  const url = connectionBase() + path;
-  const h = Object.assign({}, opts.headers||{});
-  if(cfg.key && externalMode()) h["Authorization"] = "Bearer " + cfg.key;
-  return fetch(url, Object.assign({}, opts, {headers:h, credentials:"same-origin"}));
+  return fetch(path, Object.assign({}, opts, {credentials:"same-origin"}));
 }
 
 /* ---------- auth gate ---------- */
@@ -192,10 +180,6 @@ async function ensureAuth(){
     const r = await api("/api/sessions?limit=1");
     showOfflineBanner(false);
     if(r.status !== 401) return true;
-    if(externalMode()){
-      showToast("External API unauthorized. Check the API key in Settings.", "error");
-      return true;
-    }
   }catch(e){
     setStatus("bad");
     showOfflineBanner(true, "⚠️ Offline — Cannot reach Uplink proxy. Reconnecting…");
@@ -206,22 +190,12 @@ async function ensureAuth(){
   return false;
 }
 async function submitAuth(){
-  let isExternal;
-  try{ isExternal = externalMode(); }
-  catch(error){
-    showAuth(error instanceof Error ? error.message : "Invalid Server URL.");
-    return;
-  }
-  if(isExternal){
-    showAuth("Authentication is available only through the same-origin proxy.");
-    return;
-  }
   const v = $("authInput").value.trim();
   if(!v){ $("authDiag").textContent = "Enter the passphrase."; return; }
   const button = $("authSubmit");
   button.disabled = true;
   try{
-    const r = await fetch(connectionBase()+"/__auth", {
+    const r = await fetch("/__auth", {
       method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({passphrase:v}),
@@ -248,7 +222,7 @@ async function submitAuth(){
 $("authSubmit").onclick = submitAuth;
 $("authInput").addEventListener("keydown", e=>{ if(e.key==="Enter") submitAuth(); });
 async function logout(){
-  try{ await fetch(connectionBase()+"/__logout", {method:"POST", credentials:"same-origin"}); }catch{}
+  try{ await fetch("/__logout", {method:"POST", credentials:"same-origin"}); }catch{}
   window.location.reload();
 }
 
@@ -918,11 +892,10 @@ function settleClarifyBatch(card, state, info){
 /* ---------- gateway capabilities (feature gate for client_capabilities) ---------- */
 // GET /v1/capabilities is fetched in the background; chatting never waits for it. Until it answers (or if it
 // fails or lacks the flags) both capabilities are assumed supported, so old and new gateways both work.
-let gatewayCaps = null, gatewayCapsBase = null, gatewayCapsRetryAt = 0;
+let gatewayCaps = null, gatewayCapsRequested = false, gatewayCapsRetryAt = 0;
 async function loadGatewayCaps(){
-  const b = connectionBase();
-  if(gatewayCapsBase === b || Date.now() < gatewayCapsRetryAt) return;
-  gatewayCapsBase = b;
+  if(gatewayCapsRequested || Date.now() < gatewayCapsRetryAt) return;
+  gatewayCapsRequested = true;
   const ctrl = new AbortController();
   const to = setTimeout(()=>ctrl.abort(), 4000);
   try{
@@ -931,7 +904,7 @@ async function loadGatewayCaps(){
     const d = await r.json();
     gatewayCaps = (d && typeof d === "object") ? d : null;
   }catch{
-    gatewayCaps = null; gatewayCapsBase = null; gatewayCapsRetryAt = Date.now() + 60000;
+    gatewayCaps = null; gatewayCapsRequested = false; gatewayCapsRetryAt = Date.now() + 60000;
   }finally{ clearTimeout(to); }
 }
 function clientCapabilities(){
@@ -2662,13 +2635,11 @@ function selectTab(showSkills){
 }
 $("tabSkills").onclick = ()=> selectTab(true);
 $("tabTools").onclick = ()=> selectTab(false);
-function openSettings(showKey){
+function openSettings(){
   $("settingsModal").classList.remove("hidden");
-  $("cfgUrl").value = cfg.url || "";
-  $("cfgKey").value = showKey ? (cfg.key || "") : "";
   runDiag();
 }
-$("infoBtn").onclick = ()=> openSettings(false);
+$("infoBtn").onclick = openSettings;
 $("pinSidebarBtn").onclick = toggleSidebarPin;
 pinMatcher.addEventListener("change", ()=>{ applySidebarState(isSidebarPinnedPref(), false); });
 window.addEventListener("keydown", (e)=>{
@@ -2680,9 +2651,8 @@ window.addEventListener("keydown", (e)=>{
     }
   }
 });
-$("settingsBtn").onclick = ()=> openSettings(true);
-$("cfgCancel").onclick = ()=> $("settingsModal").classList.add("hidden");
-$("cfgSave").onclick = ()=>{ cfg.url=$("cfgUrl").value.trim(); cfg.key=$("cfgKey").value.trim(); saveCfg(); $("settingsModal").classList.add("hidden"); loadSessions(); };
+$("settingsBtn").onclick = openSettings;
+$("settingsClose").onclick = ()=> $("settingsModal").classList.add("hidden");
 $("diagBtn").onclick = runDiag;
 $("logoutBtn").onclick = logout;
 $("modelChip").onclick = openModelModal;

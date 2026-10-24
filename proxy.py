@@ -171,7 +171,7 @@ def build_csp(hashes):
         "style-src 'self'; "
         "script-src-attr 'none'; style-src-attr 'none'; "
         "img-src 'self'; "
-        "connect-src 'self' https: http://127.0.0.1:* http://localhost:*; "
+        "connect-src 'self'; "
         "font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; "
         "base-uri 'none'; "
         "form-action 'self'; frame-ancestors 'none'"
