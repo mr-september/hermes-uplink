@@ -79,7 +79,6 @@ Clarify (interactive questions) is specified in [docs/clarify-protocol.md](docs/
 - **Drafts:** saved per session in `localStorage`; cleared only once a stream is established; reconciled against history so a send that reached the server is not repeated.
 - **Last-render cache:** `sessionRenderCache` per session; a failed history fetch never blanks an existing thread.
 - **Unread:** the session list carries `unread`; opening a session PATCHes `{unread:false}` after history loads. A local write guard (10 s) stops a stale list page from flipping it back. Design: [docs/mobile-edge-ux-and-session-status-spec.md](docs/mobile-edge-ux-and-session-status-spec.md).
-- **Direct mode:** Settings may point at an external HTTPS (or loopback HTTP) server with a Bearer key stored in `localStorage`; the passphrase flow works only against the same-origin proxy.
 
 ## Security model
 
@@ -87,7 +86,7 @@ Clarify (interactive questions) is specified in [docs/clarify-protocol.md](docs/
 |---|---|
 | Unauthenticated public ingress | Funnel terminates TLS; proxy passphrase gate with constant-time compare and attempt limiting |
 | API key exfiltration | Key stays in the proxy process; the browser holds only an opaque cookie |
-| Tampered or injected scripts | Digest-pinned files; CSP `default-src 'none'`, `script-src 'strict-dynamic'` with the `app.js` and `marked` digests, `script-src-attr 'none'`; `index.html` loads both scripts with matching SRI |
+| Tampered or injected scripts | Digest-pinned files; CSP `default-src 'none'`, `connect-src 'self'`, `script-src 'strict-dynamic'` with the `app.js` and `marked` digests, `script-src-attr 'none'`; `index.html` loads both scripts with matching SRI |
 | Path traversal in static serving | Fixed file allowlist plus `vendor/` and `assets/` directories, resolved with `realpath` |
 | Host pivoting | Loopback bind only; non-loopback upstreams require `--allow-remote-upstream` and HTTPS |
 | Overwriting another Funnel/Serve config | `matching_uplink_route` refuses any other public route on 443; cleanup disables only a verified Uplink route |

@@ -2,7 +2,7 @@
 
 # 📡 Hermes Uplink
 
-A near-universal, data-efficient, text-based "thin client" for [Hermes Agent](https://hermes-agent.nousresearch.com/). Hermes Uplink lets you keep your powerful desktop as the central hub—where your project files, curated skills, assets, and ML libraries reside—while directing complex workflows from any mobile or laptop browser.
+A near-universal, data-efficient, text-based "thin client" for [Hermes Agent](https://hermes-agent.nousresearch.com/). Hermes Uplink lets you keep your powerful desktop as the central hub—where your project files, curated skills, assets, and ML libraries reside—while directing complex workflows from any mobile or laptop browser (or even some smart fridges if you're into that...).
 
 Instead of relying on bandwidth-heavy screen sharing or transferring project data to an edge device, Uplink uses a loopback-only proxy behind an HTTPS tunnel. Existing sessions remain visible and resumable, while the Hermes API key stays on the host desktop.
 
@@ -142,7 +142,7 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 
 - **No API Keys in Browser:** The proxy injects the Hermes API key server-side.
 - **Pinned static assets:** The proxy validates the reviewed HTML, vendor script, and service-worker digests before serving; CSP allows only the pinned script/style sources.
-- **Direct-mode transport:** Browser direct mode accepts HTTPS endpoints or loopback HTTP only, and rejects URLs containing embedded credentials.
+- **Same-origin only:** The browser talks only to the proxy that served it (CSP `connect-src 'self'`); there is no browser-side API-key or alternate-server setting.
 - **Session Authentication:** The passphrase is accepted only by a POST authentication endpoint. The proxy issues a short-lived HttpOnly browser session cookie.
 - **Public Endpoint, Application Gate:** Tailscale Funnel makes the HTTPS endpoint publicly reachable; the Uplink passphrase remains the application-level authentication gate.
 - **Loopback Boundary:** The proxy listens only on localhost. The Funnel target is `http://127.0.0.1:8787`.
