@@ -11,10 +11,12 @@ REM    launch_local.bat stop         -> stop the background service
 REM    launch_local.bat status       -> is it running?
 REM
 REM  Env (optional):
-REM    HERMES_PORT   port to bind        (default 8787)
-REM    HERMES_UPSTREAM  API Server URL     (default http://127.0.0.1:8642)
-REM  mechanism Hermes's own gateway login item uses). It drops autostart.vbs there,
-REM  which launches proxy.py headless via pythonw.
+REM    HERMES_PORT      port to bind      (default 8787)
+REM    HERMES_UPSTREAM  API Server URL    (default http://127.0.0.1:8642)
+REM
+REM  "install" drops a launcher into the per-user Startup folder (no admin
+REM  needed, like Hermes's own gateway login item). It runs autostart.vbs, which
+REM  starts proxy.py headless via pythonw.
 REM =====================================================================
 setlocal
 cd /d "%~dp0"
@@ -137,7 +139,9 @@ REM ---------- auto-start helpers (Startup folder, no elevation) ----------
 :svc
 set "STARTUP=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup"
 set "LINK=%STARTUP%\HermesUplink.vbs"
-if /i not "%1"=="install" goto svc_not_install
+goto svc_%1
+
+:svc_install
 echo [*] Installing auto-start on login (Startup folder, headless via pythonw)...
 echo Dim WShell > "%LINK%"
 echo Set WShell = CreateObject("WScript.Shell") >> "%LINK%"
@@ -145,20 +149,20 @@ echo WShell.CurrentDirectory = """%~dp0""" >> "%LINK%"
 echo WShell.Run "wscript.exe autostart.vbs", 0, False >> "%LINK%"
 if exist "%LINK%" (echo [+] Installed. Starts on next logon. Run: launch_local.bat start) else echo [!] Failed to copy to Startup.
 goto :eof
-:svc_not_install
-if /i not "%1"=="uninstall" goto svc_not_uninstall
+
+:svc_uninstall
 if exist "%LINK%" (del /f "%LINK%" && echo [+] Removed auto-start.) else echo [!] Not installed.
 goto :eof
-:svc_not_uninstall
-if /i not "%1"=="start" goto svc_not_start
+
+:svc_start
 if exist "%LINK%" (wscript "%LINK%" && echo [+] Started headless.) else echo [!] Run 'launch_local.bat install' first.
 goto :eof
-:svc_not_start
-if /i not "%1"=="stop" goto svc_not_stop
+
+:svc_stop
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0service.ps1" -Action stop -Port %HERMES_PORT%
 goto :eof
-:svc_not_stop
-if /i not "%1"=="status" goto :eof
+
+:svc_status
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0service.ps1" -Action status -Port %HERMES_PORT%
 goto :eof
 
