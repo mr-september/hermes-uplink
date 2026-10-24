@@ -26,186 +26,159 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import BoundedSemaphore, Lock, Semaphore, Thread
 
 from console_utils import enable_console_selection
+from uplink_common import DEFAULT_PORT, DEFAULT_UPSTREAM, HEALTH_PROBE_HEADER, HEALTH_PROBE_VALUE
 
 
-UPSTREAM = "http://127.0.0.1:8642"
-PROXY_PORT = 8787
+UPSTREAM = DEFAULT_UPSTREAM
 MAX_REQUEST_BODY = 1_048_576
 MAX_AUTH_BODY = 8_192
 MAX_ERROR_BODY = 1_048_576
 UPSTREAM_TIMEOUT = 300
 AUTH_SESSION_TTL = 12 * 60 * 60
+MAX_SESSIONS = 256
 AUTH_ATTEMPT_WINDOW = 60
 AUTH_ATTEMPT_LIMIT = 10
 MAX_ACTIVE_PROXY_REQUESTS = 32
 MAX_ACTIVE_CONNECTIONS = 128
 REQUEST_HEADER_TIMEOUT = 30
 SESSION_COOKIE = "hermes_uplink_session"
-HEALTH_PROBE_HEADER = "X-Hermes-Uplink-Health"
-HEALTH_PROBE_VALUE = "1"
 SSE_KEEPALIVE_INTERVAL = 15
+FORWARDED_HEADERS = (
+    "Content-Type", "Accept", "Last-Event-ID", "Idempotency-Key", "X-Client-Turn-ID",
+    "X-Hermes-Client-Capabilities", "X-Hermes-Session-Key",
+)
 HERE = os.path.dirname(os.path.abspath(__file__))
 PID_FILE = os.path.join(HERE, ".uplink.pid")
 API_KEY = os.environ.get("HERMES_API_KEY", "")
 PASS = os.environ.get("UPLINK_PASSPHRASE", "")
 
-# These digests are deliberately pinned. The proxy must not automatically
-# authorize whatever JavaScript/HTML happens to be present on disk at startup.
-# Update the values via `python proxy.py --update-hashes` as part of the same
-# reviewed change as the corresponding static asset; startup then fails closed
-# if the deployed files drift.
-PINNED_ASSET_HASHES = {
-    "index.html": "e4NtR/g+oVpfmn5w35HzHXUR7zWu67Y19hK2k7wQYOo=",
-    "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
-    "sw.js": "KN3cJrmqGrA4FoLawEWBBDZfXIR7rX66PcM3M4u/eAo=",
+# Static assets are authorized by pinned digests, not by whatever happens to be on
+# disk. `python proxy.py --update-hashes` rewrites pinned-hashes.json (and the SRI
+# digests in index.html) as part of the same reviewed change as the asset edit;
+# startup fails closed if a served file drifts. Text assets are hashed and served
+# with line endings normalized to LF, so a CRLF checkout does not break SRI.
+PINNED_HASHES_FILE = os.path.join(HERE, "pinned-hashes.json")
+PINNED_FILES = ("index.html", "app.js", "app.css", "vendor/marked.umd.js", "sw.js")
+SCRIPT_FILES = ("app.js", "vendor/marked.umd.js")   # loaded by index.html with SRI; allowed by CSP via the same digest
+STATIC_FILES = {
+    "/": "index.html",
+    "/index.html": "index.html",
+    "/manifest.webmanifest": "manifest.webmanifest",
+    "/sw.js": "sw.js",
+    "/app.js": "app.js",
+    "/app.css": "app.css",
 }
+STATIC_DIRS = ("vendor", "assets")
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "application/javascript; charset=utf-8",
+    ".webmanifest": "application/manifest+json",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+}
+TEXT_EXTENSIONS = (".html", ".js", ".css", ".webmanifest", ".json", ".svg")
+SCRIPT_TAG_RE = re.compile(r'<script\s+src="([^"]+)"\s+integrity="sha256-([^"]+)"')
+INLINE_SCRIPT_RE = re.compile(r"<script(?![^>]*\bsrc\b)", re.IGNORECASE)
 
-INLINE_SCRIPT_HASH = "Lw0e4407oeKjf1+jmBoZPJ7Tc9tHWQO0/6D/LvavLgg="
-INLINE_STYLE_HASH = "MVi1o8Z/hb2syaZzKQLUm9ftMdctnQzpeak4ytfgEYc="
-TEXT_ASSETS = frozenset(("index.html", "sw.js"))
+
+def _read_file(full_path):
+    with open(full_path, "rb") as stream:
+        data = stream.read()
+    if os.path.splitext(full_path)[1].lower() in TEXT_EXTENSIONS:
+        data = data.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+    return data
+
+
+def _read_asset(relative_path):
+    try:
+        return _read_file(os.path.join(HERE, relative_path))
+    except OSError as error:
+        raise RuntimeError(f"required static asset is unavailable: {relative_path}") from error
 
 
 def _sha256_base64(relative_path):
-    digest = hashlib.sha256()
-    path = os.path.join(HERE, relative_path)
+    return base64.b64encode(hashlib.sha256(_read_asset(relative_path)).digest()).decode("ascii")
+
+
+def load_pinned_hashes():
     try:
-        if relative_path in TEXT_ASSETS:
-            # Git stores text assets with LF, but a Windows checkout may expose
-            # CRLF. Normalize both CRLF and bare CR to LF before hashing so the
-            # integrity check is portable without weakening content validation.
-            with open(path, "r", encoding="utf-8", newline=None) as stream:
-                for chunk in iter(lambda: stream.read(1024 * 1024), ""):
-                    digest.update(chunk.encode("utf-8"))
-        else:
-            with open(path, "rb") as stream:
-                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                    digest.update(chunk)
-    except (OSError, UnicodeError) as error:
-        raise RuntimeError(f"required static asset is unavailable: {relative_path}") from error
-    return base64.b64encode(digest.digest()).decode("ascii")
+        with open(PINNED_HASHES_FILE, "r", encoding="utf-8") as stream:
+            hashes = json.load(stream)
+    except (OSError, ValueError) as error:
+        raise RuntimeError(f"could not read pinned digests: {PINNED_HASHES_FILE}") from error
+    if not isinstance(hashes, dict) or set(hashes) != set(PINNED_FILES):
+        raise RuntimeError(f"{PINNED_HASHES_FILE} must pin exactly: {', '.join(PINNED_FILES)}")
+    return hashes
 
 
-def compute_current_hashes():
-    """Calculate the actual runtime SHA-256 digests for all static assets and inline tags."""
-    asset_hashes = {
-        rel_path: _sha256_base64(rel_path) for rel_path in PINNED_ASSET_HASHES
-    }
-
-    html_path = os.path.join(HERE, "index.html")
-    try:
-        with open(html_path, "r", encoding="utf-8", newline=None) as stream:
-            html_content = stream.read()
-    except OSError as error:
-        raise RuntimeError(f"could not read index.html: {error}") from error
-
-    # Extract inline script (excluding external src scripts)
-    script_match = re.search(r"<script(?![^>]*\bsrc\b)[^>]*>([\s\S]*?)</script>", html_content, re.IGNORECASE)
-    if not script_match:
-        raise RuntimeError("could not locate inline <script> tag in index.html")
-    script_text = script_match.group(1).replace("\r\n", "\n").replace("\r", "\n")
-    script_hash = base64.b64encode(hashlib.sha256(script_text.encode("utf-8")).digest()).decode("ascii")
-
-    # Extract inline style
-    style_match = re.search(r"<style[^>]*>([\s\S]*?)</style>", html_content, re.IGNORECASE)
-    if not style_match:
-        raise RuntimeError("could not locate inline <style> tag in index.html")
-    style_text = style_match.group(1).replace("\r\n", "\n").replace("\r", "\n")
-    style_hash = base64.b64encode(hashlib.sha256(style_text.encode("utf-8")).digest()).decode("ascii")
-
-    return {
-        "assets": asset_hashes,
-        "script": script_hash,
-        "style": style_hash,
-    }
+PINNED_HASHES = load_pinned_hashes()
 
 
 def check_pinned_hashes():
-    """Compare pinned hashes against current file hashes.
+    """Compare pinned digests with the files on disk and index.html's SRI attributes.
 
-    Returns (is_match, current_hashes, mismatches_list).
+    Returns (is_match, mismatches); each mismatch is (item, expected, actual).
     """
-    current = compute_current_hashes()
     mismatches = []
-    for rel_path, expected in PINNED_ASSET_HASHES.items():
-        actual = current["assets"].get(rel_path)
+    for rel_path, expected in PINNED_HASHES.items():
+        actual = _sha256_base64(rel_path)
         if actual != expected:
             mismatches.append((rel_path, expected, actual))
-    if current["script"] != INLINE_SCRIPT_HASH:
-        mismatches.append(("inline <script>", INLINE_SCRIPT_HASH, current["script"]))
-    if current["style"] != INLINE_STYLE_HASH:
-        mismatches.append(("inline <style>", INLINE_STYLE_HASH, current["style"]))
-    return (len(mismatches) == 0), current, mismatches
+    html = _read_asset("index.html").decode("utf-8")
+    declared = {src: digest for src, digest in SCRIPT_TAG_RE.findall(html)}
+    for src in SCRIPT_FILES:
+        if declared.get(src) != PINNED_HASHES[src]:
+            mismatches.append((f"index.html integrity for {src}", PINNED_HASHES[src], declared.get(src)))
+    if INLINE_SCRIPT_RE.search(html):
+        mismatches.append(("index.html inline <script>", "none", "present"))
+    return not mismatches, mismatches
+
+
+def validate_pinned_assets():
+    _, mismatches = check_pinned_hashes()
+    if mismatches:
+        item, expected, actual = mismatches[0]
+        raise RuntimeError(f"integrity check failed for {item}: expected sha256-{expected}, got sha256-{actual}")
 
 
 def update_pinned_hashes():
-    """Recalculate hashes and rewrite proxy.py in place with updated constants."""
-    current = compute_current_hashes()
-    proxy_path = os.path.realpath(__file__)
-    with open(proxy_path, "r", encoding="utf-8") as stream:
-        content = stream.read()
-
-    # Format PINNED_ASSET_HASHES dictionary representation
-    lines = ["PINNED_ASSET_HASHES = {"]
-    for rel_path, digest in current["assets"].items():
-        lines.append(f'    "{rel_path}": "{digest}",')
-    lines.append("}")
-    formatted_assets = "\n".join(lines)
-
-    content = re.sub(
-        r"PINNED_ASSET_HASHES\s*=\s*\{[\s\S]*?\}",
-        formatted_assets,
-        content,
-        count=1,
+    """Recompute digests, refresh index.html's SRI attributes, and rewrite pinned-hashes.json."""
+    html_path = os.path.join(HERE, "index.html")
+    script_digests = {src: _sha256_base64(src) for src in SCRIPT_FILES}
+    html = _read_asset("index.html").decode("utf-8")
+    html = SCRIPT_TAG_RE.sub(
+        lambda m: m.group(0) if m.group(1) not in script_digests
+        else f'<script src="{m.group(1)}" integrity="sha256-{script_digests[m.group(1)]}"',
+        html,
     )
-    content = re.sub(
-        r'INLINE_SCRIPT_HASH\s*=\s*"[^"]*"',
-        f'INLINE_SCRIPT_HASH = "{current["script"]}"',
-        content,
-        count=1,
+    with open(html_path, "w", encoding="utf-8", newline="\n") as stream:
+        stream.write(html)
+    hashes = {rel_path: _sha256_base64(rel_path) for rel_path in PINNED_FILES}
+    with open(PINNED_HASHES_FILE, "w", encoding="utf-8", newline="\n") as stream:
+        json.dump(hashes, stream, indent=2)
+        stream.write("\n")
+    return hashes
+
+
+def build_csp(hashes):
+    script_hashes = " ".join(f"'sha256-{hashes[src]}'" for src in SCRIPT_FILES)
+    return (
+        "default-src 'none'; "
+        f"script-src 'strict-dynamic' {script_hashes}; "
+        "style-src 'self'; "
+        "script-src-attr 'none'; style-src-attr 'none'; "
+        "img-src 'self'; "
+        "connect-src 'self' https: http://127.0.0.1:* http://localhost:*; "
+        "font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; "
+        "base-uri 'none'; "
+        "form-action 'self'; frame-ancestors 'none'"
     )
-    content = re.sub(
-        r'INLINE_STYLE_HASH\s*=\s*"[^"]*"',
-        f'INLINE_STYLE_HASH = "{current["style"]}"',
-        content,
-        count=1,
-    )
-
-    with open(proxy_path, "w", encoding="utf-8", newline="\n") as stream:
-        stream.write(content)
-
-    return current
 
 
-def _validate_pinned_asset(relative_path, expected_hash):
-    actual_hash = _sha256_base64(relative_path)
-    if actual_hash != expected_hash:
-        raise RuntimeError(
-            f"integrity check failed for {relative_path}: "
-            f"expected sha256-{expected_hash}, got sha256-{actual_hash}"
-        )
-
-
-def _validate_pinned_assets():
-    for relative_path, expected_hash in PINNED_ASSET_HASHES.items():
-        _validate_pinned_asset(relative_path, expected_hash)
-
-
-if not any(arg in sys.argv for arg in ("--update-hashes", "--check-hashes", "--help", "-h")):
-    _validate_pinned_assets()
-
-CONTENT_SECURITY_POLICY = (
-    "default-src 'none'; "
-    "script-src 'strict-dynamic' "
-    f"'sha256-{PINNED_ASSET_HASHES['vendor/marked.umd.js']}' "
-    f"'sha256-{INLINE_SCRIPT_HASH}'; "
-    f"style-src 'sha256-{INLINE_STYLE_HASH}'; "
-    "script-src-attr 'none'; style-src-attr 'none'; "
-    "img-src 'self'; "
-    "connect-src 'self' https: http://127.0.0.1:* http://localhost:*; "
-    "font-src 'self'; manifest-src 'self'; worker-src 'self'; object-src 'none'; "
-    "base-uri 'none'; "
-    "form-action 'self'; frame-ancestors 'none'"
-)
+CONTENT_SECURITY_POLICY = build_csp(PINNED_HASHES)
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "DENY",
@@ -220,6 +193,7 @@ SESSIONS = {}
 AUTH_ATTEMPTS = {}
 PROXY_SEMAPHORE = Semaphore(MAX_ACTIVE_PROXY_REQUESTS)
 READ_ERROR = object()
+TEXT = "text/plain; charset=utf-8"
 
 
 def build_opener():
@@ -249,6 +223,24 @@ def validate_upstream(url, allow_remote=False):
         if parsed.scheme != "https":
             raise ValueError("remote upstreams must use HTTPS")
     return url.rstrip("/")
+
+
+def resolve_static(path):
+    """Map a request path to an allowed static file under HERE, or None."""
+    exact = STATIC_FILES.get(path)
+    if exact:
+        return os.path.join(HERE, exact)
+    relative = urllib.parse.unquote(path.lstrip("/"))
+    directory = relative.split("/", 1)[0]
+    if directory not in STATIC_DIRS:
+        return None
+    base = os.path.realpath(os.path.join(HERE, directory))
+    full = os.path.realpath(os.path.join(HERE, relative))
+    try:
+        inside = os.path.commonpath((full, base)) == base
+    except ValueError:
+        inside = False
+    return full if inside else None
 
 
 class UplinkServer(ThreadingHTTPServer):
@@ -316,6 +308,18 @@ class Handler(BaseHTTPRequestHandler):
         if self.command != "HEAD" and body:
             self.wfile.write(body)
 
+    def _text(self, code, message, extra_headers=None):
+        self._send(code, TEXT, message, extra_headers)
+
+    def _no_content(self, set_cookie=None):
+        self.send_response(204)
+        self._security_headers()
+        self.send_header("Content-Length", "0")
+        self.send_header("Cache-Control", "no-store")
+        if set_cookie:
+            self.send_header("Set-Cookie", set_cookie)
+        self.end_headers()
+
     def _read_body(self, maximum):
         if self.headers.get("Transfer-Encoding"):
             return self._reject_body(501, b"chunked request bodies are not supported")
@@ -345,7 +349,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _reject_body(self, code, body):
         self.close_connection = True
-        self._send(code, "text/plain; charset=utf-8", body, {"Connection": "close"})
+        self._text(code, body, {"Connection": "close"})
         return READ_ERROR
 
     def _client_id(self):
@@ -405,7 +409,7 @@ class Handler(BaseHTTPRequestHandler):
             for key, expires in list(SESSIONS.items()):
                 if expires <= now:
                     del SESSIONS[key]
-            if len(SESSIONS) >= 256:
+            if len(SESSIONS) >= MAX_SESSIONS:
                 oldest = min(SESSIONS, key=SESSIONS.get)
                 del SESSIONS[oldest]
             SESSIONS[token] = expiry
@@ -433,10 +437,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_auth(self):
         if self.command != "POST":
-            self._send(405, "text/plain; charset=utf-8", b"method not allowed", {"Allow": "POST"})
+            self._text(405, b"method not allowed", {"Allow": "POST"})
             return
         if not PASS:
-            self._send(503, "text/plain; charset=utf-8", b"authentication is not configured")
+            self._text(503, b"authentication is not configured")
             return
         body = self._read_body(MAX_AUTH_BODY)
         if body is READ_ERROR:
@@ -444,207 +448,146 @@ class Handler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(body.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            self._send(400, "text/plain; charset=utf-8", b"invalid authentication request")
+            self._text(400, b"invalid authentication request")
             return
         passphrase = payload.get("passphrase") if isinstance(payload, dict) else None
         if not isinstance(passphrase, str) or not secrets.compare_digest(passphrase, PASS):
             limited, retry_after = self._auth_rate_limited()
             if limited:
-                self._send(
-                    429,
-                    "text/plain; charset=utf-8",
-                    b"too many authentication attempts",
-                    {"Retry-After": str(retry_after)},
-                )
+                self._text(429, b"too many authentication attempts", {"Retry-After": str(retry_after)})
                 return
-            self._send(401, "text/plain; charset=utf-8", b"incorrect passphrase")
+            self._text(401, b"incorrect passphrase")
             return
         self._auth_success()
-        token = self._new_session()
-        self.send_response(204)
-        self._security_headers()
-        self.send_header("Content-Length", "0")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Set-Cookie", self._session_cookie(token))
-        self.end_headers()
+        self._no_content(self._session_cookie(self._new_session()))
 
     def _handle_logout(self):
         if self.command != "POST":
-            self._send(405, "text/plain; charset=utf-8", b"method not allowed", {"Allow": "POST"})
+            self._text(405, b"method not allowed", {"Allow": "POST"})
             return
         self._remove_session()
-        self.send_response(204)
-        self._security_headers()
-        self.send_header("Content-Length", "0")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Set-Cookie", self._session_cookie("", expired=True))
-        self.end_headers()
+        self._no_content(self._session_cookie("", expired=True))
 
     def _authed(self):
         return bool(PASS) and self._session_valid()
-
-    def _deny(self):
-        self._send(401, "text/plain; charset=utf-8", b"uplink authentication required")
 
     def _forward(self, method):
         path_only = self.path.split("?", 1)[0]
         if path_only == "/__auth":
             self._handle_auth()
-            return
-        if path_only == "/__logout":
+        elif path_only == "/__logout":
             self._handle_logout()
-            return
-        if (path_only in ("/", "/index.html", "/manifest.webmanifest", "/sw.js")
-                or path_only.startswith("/vendor/")
-                or path_only.startswith("/assets/")):
+        elif path_only in STATIC_FILES or path_only.startswith(("/vendor/", "/assets/")):
             self._serve_static(path_only)
-            return
-        if path_only.startswith("/api/") or path_only.startswith("/v1/") or path_only.startswith("/health"):
-            if not self._authed():
-                self._deny()
-                return
-            self._proxy(self.path, method)
-            return
-        self._send(404, "text/plain; charset=utf-8", b"not found")
+        elif path_only.startswith(("/api/", "/v1/", "/health/")) or path_only == "/health":
+            if self._authed():
+                self._proxy(self.path, method)
+            else:
+                self._text(401, b"uplink authentication required")
+        else:
+            self._text(404, b"not found")
 
     def _serve_static(self, path):
-        if path == "/":
-            path = "/index.html"
-        relative = urllib.parse.unquote(path.lstrip("/"))
-        root = os.path.realpath(HERE)
-        fp = os.path.realpath(os.path.join(root, relative))
-        vendor_root = os.path.realpath(os.path.join(root, "vendor"))
-        assets_root = os.path.realpath(os.path.join(root, "assets"))
-        exact = {
-            os.path.realpath(os.path.join(root, "index.html")),
-            os.path.realpath(os.path.join(root, "manifest.webmanifest")),
-            os.path.realpath(os.path.join(root, "sw.js")),
-        }
-        try:
-            in_vendor = os.path.commonpath((fp, vendor_root)) == vendor_root
-        except ValueError:
-            in_vendor = False
-        try:
-            in_assets = os.path.commonpath((fp, assets_root)) == assets_root
-        except ValueError:
-            in_assets = False
-        if fp not in exact and not in_vendor and not in_assets:
-            self._send(404, "text/plain; charset=utf-8", b"not found")
+        fp = resolve_static(path)
+        if fp is None or not os.path.isfile(fp):
+            self._text(404, b"not found")
             return
-        if not os.path.isfile(fp):
-            self._send(404, "text/plain; charset=utf-8", b"not found")
-            return
-        ext = os.path.splitext(fp)[1].lower()
-        ctype = {
-            ".html": "text/html; charset=utf-8",
-            ".js": "application/javascript; charset=utf-8",
-            ".webmanifest": "application/manifest+json",
-            ".css": "text/css; charset=utf-8",
-            ".json": "application/json; charset=utf-8",
-            ".png": "image/png",
-            ".svg": "image/svg+xml",
-            ".ico": "image/x-icon",
-        }.get(ext, "application/octet-stream")
         try:
-            with open(fp, "rb") as stream:
-                data = stream.read()
+            data = _read_file(fp)
         except OSError:
             LOGGER.exception("static file read failed: %s", fp)
-            self._send(500, "text/plain; charset=utf-8", b"static file unavailable")
+            self._text(500, b"static file unavailable")
             return
-        self._send(200, ctype, data, {"Cache-Control": "no-cache" if fp.endswith("index.html") else "no-store"})
+        ctype = CONTENT_TYPES.get(os.path.splitext(fp)[1].lower(), "application/octet-stream")
+        cache = "no-cache" if fp.endswith("index.html") else "no-store"
+        self._send(200, ctype, data, {"Cache-Control": cache})
 
     def _proxy(self, path, method):
         if not PROXY_SEMAPHORE.acquire(blocking=False):
-            self._send(503, "text/plain; charset=utf-8", b"proxy is busy", {"Retry-After": "5"})
+            self._text(503, b"proxy is busy", {"Retry-After": "5"})
             return
         try:
             body = self._read_body(MAX_REQUEST_BODY)
             if body is READ_ERROR:
                 return
-            url = UPSTREAM + path
-            data = body if body else (b"" if method in ("POST", "PUT", "PATCH") else None)
-            request = urllib.request.Request(url, data=data, method=method)
-            for name in ("Content-Type", "Accept", "Last-Event-ID", "Idempotency-Key", "X-Client-Turn-ID",
-                         "X-Hermes-Client-Capabilities", "X-Hermes-Session-Key"):
-                value = self.headers.get(name)
-                if value:
-                    request.add_header(name, value)
-            if API_KEY:
-                request.add_header("Authorization", "Bearer " + API_KEY)
-            try:
-                response = build_opener().open(request, timeout=UPSTREAM_TIMEOUT)
-            except urllib.error.HTTPError as error:
-                self._send(
-                    error.code,
-                    error.headers.get("Content-Type", "application/json"),
-                    error.read(MAX_ERROR_BODY),
-                )
-                return
-            except Exception:
-                LOGGER.exception("upstream request failed")
-                self._send(502, "text/plain; charset=utf-8", b"upstream unavailable")
-                return
-
-            content_type = response.headers.get("Content-Type", "application/octet-stream")
-            self.send_response(response.status)
-            self._security_headers()
-            self.send_header("Content-Type", content_type)
-            self.send_header("Cache-Control", "no-store")
-            content_length = response.headers.get("Content-Length")
-            is_event_stream = "text/event-stream" in content_type.lower()
-            if content_length and not is_event_stream:
-                self.send_header("Content-Length", content_length)
-            else:
-                # Without a length or chunked framing, connection close is the
-                # only valid HTTP/1.1 delimiter for streamed/dechunked bodies.
-                self.send_header("Connection", "close")
-                self.close_connection = True
-            self.end_headers()
-            self.connection.settimeout(UPSTREAM_TIMEOUT)
-            try:
-                if self.command != "HEAD":
-                    if is_event_stream:
-                        fileno = None
-                        try:
-                            fileno = response.fileno()
-                        except (AttributeError, OSError, ValueError):
-                            fileno = None
-
-                        while True:
-                            if fileno is not None:
-                                try:
-                                    rlist, _, _ = select.select(
-                                        [fileno], [], [], SSE_KEEPALIVE_INTERVAL
-                                    )
-                                except (OSError, ValueError):
-                                    break
-                                if not rlist:
-                                    # Upstream quiet for SSE_KEEPALIVE_INTERVAL seconds.
-                                    # Inject SSE comment ping to prevent cellular CGNAT drops.
-                                    self.wfile.write(b": ping\n\n")
-                                    self.wfile.flush()
-                                    continue
-                            chunk = getattr(response, "read1", response.read)(65536)
-                            if not chunk:
-                                break
-                            self.wfile.write(chunk)
-                            self.wfile.flush()
-                    else:
-                        while True:
-                            chunk = getattr(response, "read1", response.read)(4096)
-                            if not chunk:
-                                break
-                            self.wfile.write(chunk)
-                            self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                LOGGER.debug("client disconnected during upstream stream")
-            except Exception:
-                LOGGER.exception("proxy stream interrupted")
-            finally:
-                response.close()
+            response = self._open_upstream(path, method, body)
+            if response is not None:
+                self._relay(response)
         finally:
             PROXY_SEMAPHORE.release()
+
+    def _open_upstream(self, path, method, body):
+        """Open the upstream request, or send the error response and return None."""
+        data = body if body else (b"" if method in ("POST", "PUT", "PATCH") else None)
+        request = urllib.request.Request(UPSTREAM + path, data=data, method=method)
+        for name in FORWARDED_HEADERS:
+            value = self.headers.get(name)
+            if value:
+                request.add_header(name, value)
+        if API_KEY:
+            request.add_header("Authorization", "Bearer " + API_KEY)
+        try:
+            return build_opener().open(request, timeout=UPSTREAM_TIMEOUT)
+        except urllib.error.HTTPError as error:
+            self._send(error.code, error.headers.get("Content-Type", "application/json"), error.read(MAX_ERROR_BODY))
+        except Exception:
+            LOGGER.exception("upstream request failed")
+            self._text(502, b"upstream unavailable")
+        return None
+
+    def _relay(self, response):
+        content_type = response.headers.get("Content-Type", "application/octet-stream")
+        is_event_stream = "text/event-stream" in content_type.lower()
+        self.send_response(response.status)
+        self._security_headers()
+        self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store")
+        content_length = response.headers.get("Content-Length")
+        if content_length and not is_event_stream:
+            self.send_header("Content-Length", content_length)
+        else:
+            # Without a length or chunked framing, connection close is the
+            # only valid HTTP/1.1 delimiter for streamed/dechunked bodies.
+            self.send_header("Connection", "close")
+            self.close_connection = True
+        self.end_headers()
+        self.connection.settimeout(UPSTREAM_TIMEOUT)
+        try:
+            if self.command != "HEAD":
+                self._pump(response, is_event_stream)
+        except (BrokenPipeError, ConnectionResetError):
+            LOGGER.debug("client disconnected during upstream stream")
+        except Exception:
+            LOGGER.exception("proxy stream interrupted")
+        finally:
+            response.close()
+
+    def _pump(self, response, is_event_stream):
+        """Copy the upstream body to the client; on SSE, ping while upstream is quiet."""
+        read = getattr(response, "read1", response.read)
+        chunk_size = 65536 if is_event_stream else 4096
+        fileno = None
+        if is_event_stream:
+            try:
+                fileno = response.fileno()
+            except (AttributeError, OSError, ValueError):
+                pass
+        while True:
+            if fileno is not None:
+                try:
+                    ready, _, _ = select.select([fileno], [], [], SSE_KEEPALIVE_INTERVAL)
+                except (OSError, ValueError):
+                    break
+                if not ready:
+                    # SSE comment ping keeps cellular CGNAT mappings alive.
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                    continue
+            chunk = read(chunk_size)
+            if not chunk:
+                break
+            self.wfile.write(chunk)
+            self.wfile.flush()
 
     def do_GET(self):
         self._forward("GET")
@@ -665,7 +608,7 @@ class Handler(BaseHTTPRequestHandler):
         self._forward("DELETE")
 
     def do_OPTIONS(self):
-        self._send(405, "text/plain; charset=utf-8", b"method not allowed", {"Allow": "GET, HEAD, POST, PUT, PATCH, DELETE"})
+        self._text(405, b"method not allowed", {"Allow": "GET, HEAD, POST, PUT, PATCH, DELETE"})
 
     def log_message(self, fmt, *args):
         if self.headers.get(HEALTH_PROBE_HEADER) == HEALTH_PROBE_VALUE:
@@ -688,20 +631,20 @@ def _remove_pid():
 
 
 def main():
-    global UPSTREAM, PROXY_PORT, API_KEY, PASS
+    global UPSTREAM
     parser = argparse.ArgumentParser(description="Hermes Uplink local proxy")
     parser.add_argument(
         "--update-hashes",
         action="store_true",
-        help="recalculate static asset SHA-256 digests and update proxy.py constants in place",
+        help="recalculate static asset SHA-256 digests; rewrites pinned-hashes.json and index.html's SRI attributes",
     )
     parser.add_argument(
         "--check-hashes",
         action="store_true",
         help="verify whether pinned asset hashes match current files without starting server",
     )
-    parser.add_argument("--upstream", default=os.environ.get("HERMES_UPSTREAM", UPSTREAM))
-    port_value = os.environ.get("HERMES_PORT", str(PROXY_PORT))
+    parser.add_argument("--upstream", default=os.environ.get("HERMES_UPSTREAM", DEFAULT_UPSTREAM))
+    port_value = os.environ.get("HERMES_PORT", str(DEFAULT_PORT))
     try:
         port_default = int(port_value)
     except ValueError:
@@ -716,26 +659,23 @@ def main():
     args = parser.parse_args()
 
     if args.update_hashes:
-        updated = update_pinned_hashes()
-        print("[+] Pinned asset hashes updated in proxy.py:")
-        for path, digest in updated["assets"].items():
+        print("[+] Pinned digests updated (pinned-hashes.json, index.html SRI):")
+        for path, digest in update_pinned_hashes().items():
             print(f"    {path}: {digest}")
-        print(f"    inline <script>: {updated['script']}")
-        print(f"    inline <style>: {updated['style']}")
         return
 
     if args.check_hashes:
-        is_match, current, mismatches = check_pinned_hashes()
+        is_match, mismatches = check_pinned_hashes()
         if is_match:
-            print("[+] All pinned asset and inline CSP digests match current files.")
+            print("[+] All pinned asset digests match current files.")
             sys.exit(0)
-        else:
-            print("[!] Pinned asset hash drift detected:")
-            for item, exp, act in mismatches:
-                print(f"    {item}:")
-                print(f"      expected: {exp}")
-                print(f"      actual:   {act}")
-            sys.exit(1)
+        print("[!] Pinned asset hash drift detected:")
+        for item, expected, actual in mismatches:
+            print(f"    {item}:")
+            print(f"      expected: {expected}")
+            print(f"      actual:   {actual}")
+        sys.exit(1)
+
     if not is_loopback_host(args.host):
         parser.error("the proxy only supports loopback binds; use an HTTPS tunnel for remote access")
     if not 1 <= args.port <= 65535:
@@ -744,14 +684,13 @@ def main():
         upstream = validate_upstream(args.upstream, args.allow_remote_upstream)
     except ValueError as error:
         parser.error(str(error))
-    api_key = os.environ.get("HERMES_API_KEY", API_KEY)
-    passphrase = os.environ.get("UPLINK_PASSPHRASE", PASS)
-    if not api_key:
+    if not API_KEY:
         parser.error("HERMES_API_KEY is required")
-    if not passphrase:
+    if not PASS:
         parser.error("UPLINK_PASSPHRASE is required")
+    validate_pinned_assets()
 
-    UPSTREAM, PROXY_PORT, API_KEY, PASS = upstream, args.port, api_key, passphrase
+    UPSTREAM = upstream
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     enable_console_selection()
     httpd = UplinkServer((args.host, args.port), Handler)

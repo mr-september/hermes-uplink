@@ -25,12 +25,12 @@ from urllib.parse import urlsplit
 import webbrowser
 
 from console_utils import enable_console_selection
+from uplink_common import DEFAULT_PORT, DEFAULT_UPSTREAM, HEALTH_PROBE_HEADER, HEALTH_PROBE_VALUE
 
 
 ROOT = Path(__file__).resolve().parent
 TAILSCALE_INSTALL_URL = "https://tailscale.com/download/windows"
 PUBLIC_PORT = 443
-DEFAULT_PORT = 8787
 LOCAL_TARGET_HOST = "127.0.0.1"
 LOCAL_PROXY_SERVER = "HermesUplink"
 COMMAND_TIMEOUT_SECONDS = 30
@@ -38,8 +38,6 @@ LOGIN_TIMEOUT_SECONDS = 300
 PROXY_START_TIMEOUT_SECONDS = 30
 PROXY_POLL_SECONDS = 0.5
 LOCAL_HEALTH_PATH = "/index.html"
-HEALTH_PROBE_HEADER = "X-Hermes-Uplink-Health"
-HEALTH_PROBE_VALUE = "1"
 
 
 class InternetAccessError(RuntimeError):
@@ -77,7 +75,6 @@ class FunnelRoute:
 
 
 CommandRunner = Callable[[Sequence[str], float], CommandResult]
-InteractiveRunner = Callable[[Sequence[str], float], CommandResult]
 
 
 def _default_runner(args: Sequence[str], timeout: float) -> CommandResult:
@@ -209,6 +206,10 @@ def _parse_json(stdout: str, context: str) -> dict[str, Any]:
     return value
 
 
+def _backend_state(payload: Mapping[str, Any]) -> str:
+    return str(payload.get("BackendState", payload.get("backendState", "unknown")))
+
+
 def _normalise_host(hostname: str) -> str:
     return hostname.rstrip(".").lower()
 
@@ -230,14 +231,10 @@ def _split_host_port(value: str) -> tuple[str, int] | None:
     host, port_text = value.rsplit(":", 1)
     if not port_text.isdigit():
         return None
-    try:
-        port = int(port_text)
-    except ValueError:
-        return None
     host = _normalise_host(host)
     if not _is_valid_public_hostname(host):
         return None
-    return host, port
+    return host, int(port_text)
 
 
 def _iter_web_sections(payload: Mapping[str, Any]) -> Iterable[Mapping[str, Any]]:
@@ -337,29 +334,25 @@ class TailscaleClient:
         self,
         executable: str,
         runner: CommandRunner | None = None,
-        interactive_runner: InteractiveRunner | None = None,
+        interactive_runner: CommandRunner | None = None,
     ) -> None:
         self.executable = executable
         self._runner = runner or _default_runner
         self._interactive_runner = interactive_runner or _default_interactive_runner
 
-    def run(self, args: Sequence[str], timeout: float = COMMAND_TIMEOUT_SECONDS) -> CommandResult:
-        command = [self.executable, *args]
+    def _invoke(self, runner: CommandRunner, args: Sequence[str], timeout: float) -> CommandResult:
         try:
-            return self._runner(command, timeout)
+            return runner([self.executable, *args], timeout)
         except FileNotFoundError as exc:
             raise InternetAccessError(f"Tailscale executable was not found: {self.executable}") from exc
         except subprocess.TimeoutExpired as exc:
             raise InternetAccessError(f"Tailscale command timed out: {' '.join(args)}") from exc
 
+    def run(self, args: Sequence[str], timeout: float = COMMAND_TIMEOUT_SECONDS) -> CommandResult:
+        return self._invoke(self._runner, args, timeout)
+
     def run_interactive(self, args: Sequence[str], timeout: float = COMMAND_TIMEOUT_SECONDS) -> CommandResult:
-        command = [self.executable, *args]
-        try:
-            return self._interactive_runner(command, timeout)
-        except FileNotFoundError as exc:
-            raise InternetAccessError(f"Tailscale executable was not found: {self.executable}") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise InternetAccessError(f"Tailscale command timed out: {' '.join(args)}") from exc
+        return self._invoke(self._interactive_runner, args, timeout)
 
     def status(self) -> dict[str, Any]:
         args = ["status", "--json"]
@@ -373,8 +366,7 @@ class TailscaleClient:
             payload = self.status()
         except InternetAccessError:
             return False
-        state = payload.get("BackendState", payload.get("backendState"))
-        return state is not None and str(state).lower() in {"running", "connected"}
+        return _backend_state(payload).lower() in {"running", "connected"}
 
     def login(self) -> None:
         result = self.run_interactive(["up"], timeout=LOGIN_TIMEOUT_SECONDS)
@@ -429,7 +421,7 @@ def is_upstream_healthy(
     timeout: float = 2.0,
 ) -> bool:
     """Probe upstream Hermes Gateway health endpoint directly on loopback."""
-    target_url = upstream_url or os.environ.get("HERMES_UPSTREAM", "http://127.0.0.1:8642")
+    target_url = upstream_url or os.environ.get("HERMES_UPSTREAM", DEFAULT_UPSTREAM)
     try:
         parsed = urlsplit(target_url)
         host = parsed.hostname or LOCAL_TARGET_HOST
@@ -554,10 +546,6 @@ def ensure_funnel_route(client: TailscaleClient, port: int) -> FunnelRoute:
     route = matching_uplink_route(routes, port)
     if route is not None:
         return route
-    if any(existing.public_port == PUBLIC_PORT for existing in routes):
-        raise InternetAccessError(
-            "Tailscale port 443 is already in use by another route; refusing to overwrite it."
-        )
     print("[*] Enabling Tailscale Funnel for the local Uplink proxy.")
     print("[*] If Tailscale requests Funnel approval, complete that browser step and wait for this command to return.")
     client.enable_funnel(port)
@@ -607,7 +595,7 @@ def start_access(port: int, root: Path = ROOT) -> int:
 
 def show_status(port: int) -> int:
     proxy_ok = is_local_proxy_healthy(port)
-    upstream_target = os.environ.get("HERMES_UPSTREAM", "http://127.0.0.1:8642")
+    upstream_target = os.environ.get("HERMES_UPSTREAM", DEFAULT_UPSTREAM)
     upstream_ok = is_upstream_healthy(upstream_target)
     print(f"Local proxy (127.0.0.1:{port}): {'RUNNING' if proxy_ok else 'NOT RUNNING'}")
     print(f"Hermes gateway ({upstream_target}): {'REACHABLE' if upstream_ok else 'OFFLINE / UNREACHABLE'}")
@@ -615,7 +603,7 @@ def show_status(port: int) -> int:
     client = build_client()
     try:
         status = client.status()
-        print(f"Tailscale state: {status.get('BackendState', status.get('backendState', 'unknown'))}")
+        print(f"Tailscale state: {_backend_state(status)}")
     except InternetAccessError as exc:
         print(f"[!] {exc}")
         return 1

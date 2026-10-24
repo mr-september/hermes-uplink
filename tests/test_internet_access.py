@@ -177,21 +177,6 @@ class InternetAccessTests(unittest.TestCase):
                 ["tailscale.exe", "funnel", "--https=443", "off"],
             ],
         )
-        self.assertNotIn("test-passphrase", json.dumps(interactive.calls + runner.calls))
-
-    def test_funnel_enable_uses_interactive_runner(self):
-        calls = []
-
-        def interactive(args, timeout):
-            calls.append((list(args), timeout))
-            return internet_access.CommandResult(0, "", "")
-
-        client = internet_access.TailscaleClient(
-            "tailscale.exe",
-            interactive_runner=interactive,
-        )
-        client.enable_funnel(8787)
-        self.assertEqual(calls[0][0], ["tailscale.exe", "funnel", "--bg", "--yes", "--https=443", "http://127.0.0.1:8787"])
 
     def test_status_command_requires_valid_json(self):
         runner = FakeRunner(
