@@ -2,7 +2,7 @@
 
 ## Marked
 
-The vendored `vendor/marked.umd.js` bundle is based on Marked v17 and is
+The vendored `web/vendor/marked.umd.js` bundle is based on Marked v17 and is
 distributed under the MIT license.
 
 Marked copyright (c) 2018+, MarkedJS (https://github.com/markedjs/)
