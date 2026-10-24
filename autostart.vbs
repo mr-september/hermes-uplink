@@ -3,7 +3,7 @@
 ' Safety: binds loopback only; remote access must use an HTTPS tunnel.
 
 Option Explicit
- Dim WShell, FSO, repo, key, pass, port, upstream, pythonw, cmd
+Dim WShell, FSO, repo, key, pass, port, upstream, pythonw, cmd
 Set WShell = CreateObject("WScript.Shell")
 Set FSO = CreateObject("Scripting.FileSystemObject")
 
