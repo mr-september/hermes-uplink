@@ -1,6 +1,6 @@
 # Clarify protocol (client contract)
 
-When the agent calls `clarify`, the gateway emits a question on the open chat stream and waits. Uplink renders a card; the answer travels over a separate HTTP call, never a second `/chat/stream`. This documents what [web/app.js](../web/app.js) sends and expects; the Hermes gateway's API server is authoritative. A gateway that does not advertise clarify support (see below) never emits these events, and Uplink then behaves as a plain chat client.
+When the agent calls `clarify`, the gateway emits a question on the open chat stream and waits. Uplink renders a card; the answer travels over a separate HTTP call, never a second `/chat/stream`. This documents what [web/app.js](../web/app.js) sends and expects; the Hermes gateway's API server is authoritative. A gateway that does not advertise clarify support (see below) never emits these events, and Uplink then behaves as a plain chat client. See [gateway-requirements.md](gateway-requirements.md) for what stock Hermes provides.
 
 ## Notification (SSE, on `POST /api/sessions/{id}/chat/stream`)
 
