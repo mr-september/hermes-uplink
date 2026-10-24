@@ -1,6 +1,6 @@
 # Hermes Uplink — Mobile Edge UX & Shared Session Status
 
-**Status:** Agreed scope for planning; implementation not started (2026-10-19). Revised 2026-10-20: coverage decision **B2-lite** adopted; roadmap resequenced (see §4, §8, §7).
+**Status:** Milestones 1 and 2 are implemented on `master`; milestones 3-5 are not started (updated 2026-10-24). Coverage decision **B2-lite** (2026-10-20); see §4, §7, §8.
 **Target:** mobile Edge on phone/tablet; preserve desktop behavior.
 **Uplink baseline:** `E:/hermes-uplink`, branch `master`, commit `ada3e17` at spec creation.
 **Hermes baseline:** `C:\Users\Larry\AppData\Local\hermes\hermes-agent`, commit `5247b2b` (fork of NousResearch/hermes-agent per its `FORK.md`; `origin` is read-only upstream). Phase B changes this repo, not Uplink (§3.7). §2 claims were verified against it on 2026-10-19.
@@ -86,9 +86,9 @@ On phones the sidebar is a closed drawer, so per-row indicators are only seen af
 - The composer advertises “Enter to send” while coarse-pointer input handling makes Enter insert a newline; Ctrl+Enter sends. Keep mobile Enter as newline and make the hint accurate (or generic).
 - `viewport-fit=cover`, dynamic viewport sizing, and mobile safe-area padding already exist; preserve them.
 - `renderSessions()` renders a "live" badge from `s.active` (never populated, see above), sorts by `updated_at || last_active`, and the client refreshes only on load and `visibilitychange`/focus (no polling).
-- `probePendingClarify()` already uses `GET /api/sessions/{id}/clarify/pending` for the *active* session only; `docs/clarify-design-spec.md` defines that transport and is the natural source for `needs_input`.
-- The proxy CSP sets `style-src-attr 'none'` and `script-src-attr 'none'`: new UI (More menu, status cues) must use CSS classes and `addEventListener`/property handlers, never inline `style=""` or `onclick=""` attributes, and must not inject `<style>` elements.
-- Any `index.html` edit must recompute all three proxy pins: `INLINE_SCRIPT_HASH`, `INLINE_STYLE_HASH`, and `PINNED_ASSET_HASHES['index.html']`. Stale pins fail closed and prevent proxy startup. Recompute with `python proxy.py --update-hashes` (verify with `--check-hashes`) in the same change; the relevant checks are in `tests/test_proxy.py`. Do not bump `sw.js` unless it changes (index.html is not cached by the service worker).
+- `probePendingClarify()` already uses `GET /api/sessions/{id}/clarify/pending` for the *active* session only; `docs/clarify-protocol.md` defines that transport and is the natural source for `needs_input`.
+- The proxy CSP sets `style-src-attr 'none'` and `script-src-attr 'none'` and allows only pinned external scripts: new UI (More menu, status cues) must use CSS classes and `addEventListener`/property handlers, never inline `style=""` or `onclick=""` attributes, and must not inject `<style>` elements.
+- Any edit to `index.html`, `app.js`, `app.css` or `sw.js` must refresh the pinned digests with `python proxy.py --update-hashes` (verify with `--check-hashes`) in the same change; stale pins fail closed and prevent proxy startup. Do not bump `sw.js` unless it changes (neither `index.html` nor `app.js` is cached by the service worker).
 
 ### Hermes API and Electron reference
 
@@ -157,15 +157,12 @@ Render working / stalled / background / needs-input / unknown / stale states per
 
 1. **Coverage:** decided: B2-lite (§1.1). Re-open only if Electron/CLI-originated runs turn out to matter more than expected after Milestone 5.
 2. **More-menu contents:** default to Capabilities, Copy session ID, Refresh, and Skills/Tools, keeping Sessions/model selection/Send visible. Confirm only if one of those secondary actions should remain directly visible on a 320px screen.
-3. **Branching:** decided: everything stays on the user's own forks, nothing is pushed or proposed upstream. Hermes commits go directly on the fork's `larry` branch, following the precedent of earlier Uplink-driven commits there (`feat(api): ...`); Uplink work sits on `feat/mobile-edge-ux-unread` for review before merging to `master`.
+3. **Branching:** decided: everything stays on the user's own forks, nothing is pushed or proposed upstream. Hermes commits go directly on the fork's `larry` branch, following the precedent of earlier Uplink-driven commits there (`feat(api): ...`); Uplink work was reviewed on a feature branch and is merged to `master`.
 
 ## 7. Revision log
 
-- **2026-10-20 (implementation start):** **retracted** the earlier claim of a duplicated `offlineRetryBtn` id (it was a misread of overlapping line ranges; the file has one button). Milestone 1 implemented; Milestone 2a implemented with a single-row `get_session_unread` helper because get/patch rows lack the derived `unread` list rows carry.
-- **2026-10-20:** adopted B2-lite; added coverage table and the `idle`→`unknown` foreign-lease rule (§1.1); documented NULL-watermark unread caveat and gateway `TurnState`/lease-registry findings (§2); resequenced the roadmap into five independently shippable milestones, shipping unread early (§4); added action plan (§8) and deferred B2-full design (Appendix A).
-
-- **2026-10-19 verification pass (Hermes 5247b2b):** confirmed unread omission, PATCH/watermark and lineage behaviour, `_run_statuses`, and Electron precedence; **corrected** an earlier revision that assumed a working `active` flag (it is never emitted); added finding that Electron activity is client-local, the unread write guard, background precedence, `is_internal_child`, same-process messaging tracking, and B1/B2 split.
-- **2026-10-19 audit revisions:** added Hermes baseline placeholder and cross-repo guardrail (§3.7); audit of existing `active` flag and `clarify/pending` source; separated unsupported-source vs stale-snapshot rendering; documented deviations from Electron (draft, stalled); added drawer-level aggregate dot (§1.6); defined phone width by main-pane width plus short-height behaviour; read-watermark write rate limit; freshness transport proposal; CSP constraints and `--update-hashes`; menu/reduced-motion accessibility; decoupled Phase C from A/B.
+- **2026-10-20:** adopted B2-lite (coverage table, `idle`→`unknown` foreign-lease rule); resequenced into five independently shippable milestones; implementation started. Retracted a mistaken duplicate-`offlineRetryBtn` claim.
+- **2026-10-19:** verified against Hermes `5247b2b`: `unread` is computed but not exposed; `active` is never emitted (the client's "live" badge was dead code and has since been removed); Electron activity is client-local runtime state; added the unread write guard, background precedence, `is_internal_child`, and the B1/B2 split.
 
 ## 8. Action plan
 
@@ -178,7 +175,7 @@ Render working / stalled / background / needs-input / unknown / stale states per
 | 4 | Activity projection (B2-lite) | Hermes fork | new `gateway/platforms/api_session_status.py`; one-line hooks in `api_server.py`; `FORK.md` note | new tests in `tests/gateway/test_session_api.py` (scenarios in Milestone 4 gate); 200-row latency check | disable via capability flag / revert hook; Uplink shows nothing for absent field |
 | 5 | Working indicators (D2) + freshness poll | Uplink | `index.html`, pins | transitions, offline/stale, reduced-motion, narrow viewport checks | revert commit |
 
-**Progress (2026-10-20, committed locally, nothing pushed):** Hermes `35a6dd36d7` on `larry`; Uplink `8e00d70` (header) and `4a48c37` (unread) on branch `feat/mobile-edge-ux-unread`. Milestone 1 implemented and checked in headless Chromium at 320/390 portrait and 844×390 landscape plus desktop (no overflow, 44px targets on coarse pointers, More menu keyboard/Escape/focus-return, 7px dot). Milestone 2a implemented (`unread` on list/get/patch via new `SessionDB.get_session_unread`; 40/40 `tests/gateway/test_session_api.py` pass in a Linux Python 3.12 venv). Milestone 2b implemented and scripted-tested against a mocked API (unread badge, drawer dot, read-on-open, write guard, rate limit, failed PATCH, absent field, child filtering). Not yet exercised: a real Hermes gateway restart plus live cross-client check with Electron, and a physical phone. Milestones 3-5 not started.
+**Progress (2026-10-24):** Hermes `35a6dd36d7` on `larry`; Uplink `8e00d70` (header) and `4a48c37` (unread) on `master`. Milestone 1 implemented and checked in headless Chromium at 320/390 portrait and 844×390 landscape plus desktop (no overflow, 44px targets on coarse pointers, More menu keyboard/Escape/focus-return, 7px dot). Milestone 2a implemented (`unread` on list/get/patch via new `SessionDB.get_session_unread`; 40/40 `tests/gateway/test_session_api.py` pass in a Linux Python 3.12 venv). Milestone 2b implemented and scripted-tested against a mocked API (unread badge, drawer dot, read-on-open, write guard, rate limit, failed PATCH, absent field, child filtering). Not yet exercised: a real Hermes gateway restart plus live cross-client check with Electron, and a physical phone. Milestones 3-5 not started.
 
 Working rules: each milestone is its own commit (Hermes on a feature branch in the fork); Hermes gateway restart is needed after 2a and 4; do not start 5 before 4's gate passes; Kanban holds task-level execution status, this spec holds the contract.
 

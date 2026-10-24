@@ -1,628 +1,118 @@
-# 📐 Hermes Uplink — System Architecture & Technical Topology
+# Hermes Uplink: Architecture
 
-This document provides a comprehensive, multi-resolution architectural reference for **Hermes Uplink**. It is designed to give maintainers, contributors, and systems engineers an immediate, high-fidelity understanding of the codebase structure, execution boundaries, communication contracts, and security invariants.
+Uplink is a zero-build browser client plus a loopback-only proxy for [Hermes Agent](https://hermes-agent.nousresearch.com/). The proxy gates access with a passphrase, injects the Hermes API key server-side, and serves the pinned static client. Internet exposure is owned entirely by Tailscale Funnel; nothing in this repository stores tunnel credentials.
 
----
+Design constraints:
 
-## 1. System Overview & Core Design Tenets
+- **No build step.** Plain HTML, CSS and JS with one vendored dependency (`marked`); Python standard library only.
+- **Loopback only.** The proxy binds 127.0.0.1; the API key never reaches the browser.
+- **Pinned assets.** Served files are authorized by SHA-256 digests; the proxy refuses to start if they drift.
+- **Shared sessions.** Sessions live in the Hermes store, so Uplink, CLI, TUI and cron see the same conversations.
+- **Frugal connectivity.** No background polling: refresh on focus/visibility, last-render cache, draft autosave, SSE keepalive.
 
-Hermes Uplink is a data-efficient, zero-build "thin client" and secure reverse-proxy gateway for [Hermes Agent](https://hermes-agent.nousresearch.com/). It enables remote interaction with a local Hermes runtime from mobile and edge browsers without exposing private files, LLM API keys, or raw terminal environments.
-
-```
-┌───────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                         CORE DESIGN PRINCIPLES                                        │
-├───────────────────────────────┬───────────────────────────────┬───────────────────────────────────────┤
-│ 1. Zero Build Steps           │ 2. Loopback Isolation         │ 3. Provider Discipline                │
-│ Single vanilla HTML/JS file   │ Proxy listens strictly on     │ Internet exposure is owned exclusively│
-│ with vendored dependencies;   │ 127.0.0.1; LLM API keys never │ by Tailscale Funnel. No tunnel        │
-│ no npm, webpack, or node.js.  │ reach the client browser.     │ binaries or credentials in repo.      │
-├───────────────────────────────┼───────────────────────────────┼───────────────────────────────────────┤
-│ 4. Single Source of Truth     │ 5. Pinned Integrity Guard     │ 6. Battery & Network Resilience       │
-│ Shares `%LOCALAPPDATA%\hermes\`│ Static assets are SHA-256     │ Focus-based sync, last-render cache,  │
-│ sessions with CLI, TUI, cron. │ hash-verified at proxy boot.  │ draft autosave & online/offline sync. │
-└───────────────────────────────┴───────────────────────────────┴───────────────────────────────────────┘
-```
-
----
-
-## 2. C4 Architecture Diagrams
-
-### Level 1: System Context & Trust Boundaries
-
-The diagram below illustrates the physical boundaries, networks, external platforms, and security perimeters separating the edge client, the host operating system, and the upstream Hermes core.
+## Components
 
 ```mermaid
 flowchart TB
-    subgraph WAN["Public Internet / Untrusted Network"]
-        direction TB
-        EDGE["Edge Browser Client<br/><b>(Mobile iOS/Android, Laptop, Tablet)</b><br/><i>PWA Shell / Vanilla JS / DOM</i>"]
+    subgraph WAN["Untrusted network"]
+        EDGE["Browser<br/>index.html + app.js + app.css"]
     end
-
-    subgraph TS_CLOUD["Tailscale Infrastructure"]
-        TS_FUNNEL["Tailscale Funnel Ingress<br/><b>*.ts.net (Port 443)</b><br/><i>TLS Termination & Route Forwarding</i>"]
+    subgraph HOST["Windows host"]
+        TS["Tailscale Funnel<br/>*.ts.net :443 -> 127.0.0.1:8787"]
+        PROXY["proxy.py :8787<br/>passphrase gate, static assets,<br/>Bearer injection, SSE relay"]
+        GW["Hermes gateway API server :8642"]
+        STORE[("Shared Hermes session store")]
     end
-
-    subgraph HOST["Host Desktop Boundary (Windows 10/11 Host Machine)"]
-        direction TB
-
-        subgraph SEC_NET["Loopback Network Interface (127.0.0.1)"]
-            direction TB
-            TS_DAEMON["Tailscale Client Service<br/><b>tailscale.exe / IPN</b><br/><i>Background Tunnel Route Manager</i>"]
-            
-            PROXY["Hermes Uplink Proxy<br/><b>proxy.py (:8787)</b><br/><i>• Passphrase Gate & Session Auth<br/>• Static Asset Integrity (SHA-256)<br/>• Upstream Bearer Token Injection<br/>• Concurrency & Rate Limiting</i>"]
-            
-            GATEWAY["Hermes Core Gateway & API Server<br/><b>api_server.py (:8642)</b><br/><i>• LLM Orchestration & Agent Loops<br/>• Tool Execution Engine<br/>• Clarify State Machine & Gateway</i>"]
-        end
-
-        subgraph DISK["Host Storage / Local Filesystem"]
-            SECRETS["Repository Secret Files<br/><b>.uplink-key.txt</b> (API Bearer)<br/><b>.uplink-pass.txt</b> (Passphrase)<br/><b>.uplink.pid</b> (Process ID)"]
-            SESSIONS[("Shared Hermes Store<br/><b>%LOCALAPPDATA%\hermes\sessions\</b><br/><i>JSON / SQLite Session Records</i>")]
-            HERMES_CONF["Hermes Global Config<br/><b>~/.hermes/config.yaml</b><br/><i>API_SERVER_ENABLED: true</i>"]
-        end
-
-        subgraph CTRL["Control Plane & Service Automation"]
-            LAUNCH_INT["launch_internet.bat<br/><b>internet_access.py</b><br/><i>Funnel Lifecycle & Verification</i>"]
-            LAUNCH_LOC["launch_local.bat<br/><b>service.ps1</b> / <b>autostart.vbs</b><br/><i>Service & Startup Management</i>"]
-        end
-    end
-
-    %% Network & IPC flows
-    EDGE <== "HTTPS / TLS 1.3 (Port 443)<br/>[No API Key, Passphrase Cookie]" ==> TS_FUNNEL
-    TS_FUNNEL <== "Encrypted WireGuard Mesh" ==> TS_DAEMON
-    TS_DAEMON <== "HTTP / 1.1 Forwarding<br/>http://127.0.0.1:8787" ==> PROXY
-    EDGE -.->|"Optional Direct LAN / Local Loopback"| PROXY
-
-    PROXY <== "HTTP / 1.1 REST + SSE<br/>+ Header Authorization: Bearer &lt;KEY&gt;" ==> GATEWAY
-    GATEWAY <-->|"Read / Write Sessions"| SESSIONS
-    LAUNCH_LOC -.->|"Configures"| HERMES_CONF
-    LAUNCH_LOC -.->|"Generates / Reads"| SECRETS
-    PROXY -.->|"Loads Secrets & PID"| SECRETS
-    LAUNCH_INT <-->|"CLI Subprocess Control"| TS_DAEMON
-    LAUNCH_INT -.->|"Health Probes"| PROXY
-
-    %% Styling classes
-    classDef edgeClass fill:#1f6feb15,stroke:#1f6feb,stroke-width:2px;
-    classDef tunnelClass fill:#bc8cff15,stroke:#bc8cff,stroke-width:2px;
-    classDef proxyClass fill:#f0a50015,stroke:#f0a500,stroke-width:2px;
-    classDef gatewayClass fill:#3fb95015,stroke:#3fb950,stroke-width:2px;
-    classDef storageClass fill:#21262d,stroke:#30363d,stroke-width:1px;
-
-    class EDGE edgeClass;
-    class TS_FUNNEL,TS_DAEMON tunnelClass;
-    class PROXY proxyClass;
-    class GATEWAY gatewayClass;
-    class SECRETS,SESSIONS,HERMES_CONF storageClass;
+    EDGE -- "HTTPS, session cookie" --> TS --> PROXY
+    EDGE -. "local: http://127.0.0.1:8787" .-> PROXY
+    PROXY -- "HTTP + Bearer key" --> GW --> STORE
 ```
 
----
+| File | Role |
+|---|---|
+| [proxy.py](proxy.py) | Reverse proxy, auth gate, static server, digest verification |
+| [pinned-hashes.json](pinned-hashes.json) | Pinned SHA-256 digests of every served script/page/style (written by `--update-hashes`) |
+| [uplink_common.py](uplink_common.py) | Defaults and health-probe header shared by the two Python entry points |
+| [internet_access.py](internet_access.py) | Tailscale Funnel lifecycle: status parsing, ownership guard, consent URL handling |
+| [console_utils.py](console_utils.py) | Re-enables QuickEdit selection in the Windows console |
+| [index.html](index.html), [app.css](app.css), [app.js](app.js) | Client markup, styles, logic |
+| [sw.js](sw.js), [manifest.webmanifest](manifest.webmanifest) | PWA installability; the worker caches only the manifest, itself and `marked`, and never `index.html` or API calls |
+| [launch_local.bat](launch_local.bat) | Configures Hermes, generates `.uplink-key.txt` / `.uplink-pass.txt`, restarts the gateway, runs the proxy; also `install`/`start`/`stop`/`status` for login auto-start |
+| [autostart.vbs](autostart.vbs), [service.ps1](service.ps1) | Headless start at login; PID-checked stop/status |
+| [launch_internet.bat](launch_internet.bat) | Wrapper for `internet_access.py` |
 
-### Level 2: Component Architecture & Codebase Shape
+The proxy takes the API key and passphrase from the `HERMES_API_KEY` and `UPLINK_PASSPHRASE` environment variables; the launchers read them from the git-ignored secret files.
 
-The codebase is intentionally lean and modular, relying strictly on standard libraries (Python standard library, Windows scripting host, native Web APIs).
+## Authentication and sessions
 
-```mermaid
-graph TD
-    subgraph FRONTEND["Edge / Client-Side Presentation Layer"]
-        INDEX_HTML["<b>index.html</b><br/>• Reactive 3-pane responsive layout<br/>• Orientation-gated sidebar pinning (dock vs flyout)<br/>• SSE stream decoder & non-destructive render<br/>• Turn idempotency (Draft-bound UUID / Idempotency-Key)<br/>• Clarify interactive question cards<br/>• Model & Provider selector modal<br/>• Composer draft autosave & history reconciliation<br/>• Online/offline banner & auto-recovery<br/>• Session pre-render cache isolation<br/>• Battery-friendly focus refresh"]
-        VENDOR_MARKED["<b>vendor/marked.umd.js</b><br/>• Pinned offline Markdown parser (v17)"]
-        SW_JS["<b>sw.js</b><br/>• PWA service worker shell caching<br/>• Dynamic asset bypass"]
-        MANIFEST["<b>manifest.webmanifest</b><br/>• Mobile PWA metadata & icons"]
-    end
-
-    subgraph PROXY_LAYER["Reverse Proxy & Gateway Security Layer"]
-        PROXY_PY["<b>proxy.py</b><br/>• UplinkServer (ThreadingHTTPServer)<br/>• Handler (BaseHTTPRequestHandler)<br/>• Session Gate & Rate Limiting (AUTH_ATTEMPTS)<br/>• SHA-256 Pinned Asset Validator<br/>• Forward Idempotency-Key & X-Client-Turn-ID<br/>• SSE Keepalive Heartbeats (15s : ping)<br/>• HTTP Header & Body Sanitizer<br/>• SSE Connection Delimiting"]
-        CONSOLE_UTILS["<b>console_utils.py</b><br/>• Win32 Console QuickEdit Enabler"]
-    end
-
-    subgraph TUNNEL_LAYER["Network Access & Ingress Control Layer"]
-        NET_ACCESS["<b>internet_access.py</b><br/>• TailscaleClient wrapper<br/>• FunnelRoute schema parser & validator<br/>• Port 443 Conflict & Ownership Guard<br/>• Consent URL extractor & browser launcher<br/>• Health probe loop (ensure_local_proxy)"]
-    end
-
-    subgraph CONTROL_LAYER["Host Orchestration & Service Lifecycle Layer"]
-        LAUNCH_INT_BAT["<b>launch_internet.bat</b><br/>Interactive CLI launcher for Funnel"]
-        LAUNCH_LOC_BAT["<b>launch_local.bat</b><br/>Local proxy launcher & service installer"]
-        AUTOSTART_VBS["<b>autostart.vbs</b><br/>Headless pythonw logon runner"]
-        SERVICE_PS1["<b>service.ps1</b><br/>PowerShell PID & process status monitor"]
-    end
-
-    subgraph TEST_SUITE["Verification & Test Suite"]
-        TEST_PROXY["<b>tests/test_proxy.py</b><br/>Auth, sessions, CSP, SSE, and edge cases"]
-        TEST_NET["<b>tests/test_internet_access.py</b><br/>FakeRunner, Funnel parsing, route conflicts"]
-    end
-
-    %% Dependencies
-    INDEX_HTML --> VENDOR_MARKED
-    INDEX_HTML --> SW_JS
-    INDEX_HTML --> MANIFEST
-    
-    PROXY_PY --> CONSOLE_UTILS
-    PROXY_PY -.->|"Serves"| INDEX_HTML
-    PROXY_PY -.->|"Serves"| VENDOR_MARKED
-    PROXY_PY -.->|"Serves"| SW_JS
-
-    NET_ACCESS --> CONSOLE_UTILS
-    LAUNCH_INT_BAT --> NET_ACCESS
-    LAUNCH_LOC_BAT --> PROXY_PY
-    LAUNCH_LOC_BAT --> SERVICE_PS1
-    AUTOSTART_VBS --> PROXY_PY
-
-    TEST_PROXY -.->|"Tests"| PROXY_PY
-    TEST_NET -.->|"Tests"| NET_ACCESS
-```
-
----
-
-## 3. Detailed Runtime Sequence Flows
-
-### 3.1 Authentication & Session Gate Flow
-
-Before any proxy routes (`/api/*`, `/v1/*`, `/health`) are accessible, the browser must clear the passphrase gate.
+`/api/*`, `/v1/*` and `/health` require a session cookie. The browser probes `/api/sessions`; a transport failure shows the offline banner, a `401` shows the passphrase modal.
 
 ```mermaid
 sequenceDiagram
-    autonumber
-    actor User as User (Edge Browser)
-    participant Client as index.html
-    participant Proxy as proxy.py (:8787)
-    participant Upstream as Hermes Gateway (:8642)
-
-    User->>Client: Open URL (https://node.tailnet.ts.net/)
-    Client->>Proxy: GET /api/sessions?limit=1 (Initial Probe)
-
-    alt Network Transport Failure (Offline / Connection Drop)
-        Client->>Client: Display Top Banner (#offlineBanner) & scheduleProbe()
-        Note over Client: Does NOT show Passphrase Modal (#authModal)
-    else 401 Unauthorized (Missing/invalid session cookie)
-        Proxy-->>Client: 401 Unauthorized
-        Client->>Client: Display Passphrase Modal (#authModal)
-        User->>Client: Types Passphrase & hits Connect
-        Client->>Proxy: POST /__auth {"passphrase": "..."}
-        
-        alt Passphrase Incorrect
-            Proxy->>Proxy: Increment AUTH_ATTEMPTS (Rate limit: 10/60s)
-            Proxy-->>Client: 401 Unauthorized or 429 Too Many Requests
-            Client->>User: Display error message on modal
-        else Passphrase Correct
-            Proxy->>Proxy: Clear failure records & generate secrets.token_urlsafe(32)
-            Proxy->>Proxy: Store in SESSIONS[token] = now + 12h TTL
-            Proxy-->>Client: 204 No Content<br/>Set-Cookie: hermes_uplink_session=...; HttpOnly; SameSite=Strict; Path=/
-            Client->>Client: Hide Modal, invoke boot()
-            Client->>Proxy: GET /api/sessions (Cookie attached)
-            Proxy->>Proxy: Validate token in SESSIONS map
-            Proxy->>Upstream: GET /api/sessions (Add Header "Authorization: Bearer <KEY>")
-            Upstream-->>Proxy: 200 OK [{"id": "s1", ...}]
-            Proxy-->>Client: 200 OK [{"id": "s1", ...}]
-            Client->>User: Render session sidebar & active chat
-        end
-    end
+    participant B as Browser
+    participant P as proxy.py
+    participant G as Hermes gateway
+    B->>P: GET /api/sessions?limit=1
+    P-->>B: 401
+    B->>P: POST /__auth {"passphrase"}
+    P-->>B: 204 + Set-Cookie (HttpOnly, SameSite=Strict, Secure behind HTTPS)
+    B->>P: GET /api/sessions (cookie)
+    P->>G: GET /api/sessions + Authorization: Bearer key
+    G-->>B: 200 (relayed)
 ```
 
----
+Passphrase failures are limited to 10 per 60 s per client address (the correct passphrase is never locked out). Sessions last 12 h, at most 256 at a time. At most 32 proxy requests run concurrently (excess get `503`) and 128 connections (excess are dropped).
 
-### 3.2 Turn Streaming & SSE Pipeline Flow
+## Streaming
 
-When the user dispatches a message, Uplink opens a persistent connection and streams Server-Sent Events from the Hermes runtime.
+The client opens `POST /api/sessions/{id}/chat/stream` with `Idempotency-Key` / `X-Client-Turn-ID` set to a per-draft UUID that is kept until the stream is established, so a retried send reuses it. The proxy relays the SSE body unbuffered, closes the connection to delimit it, and writes `: ping` every 15 s of upstream silence to keep cellular NAT mappings alive; the client ignores comment frames.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor User as User
-    participant UI as index.html (Composer & Thread)
-    participant Proxy as proxy.py
-    participant API as api_server.py
-    participant Worker as Agent Worker Thread
+Frames consumed by `handleFrame` (the gateway is authoritative): `assistant.delta {delta}`, `assistant.commentary {text, already_streamed}`, `assistant.completed {content}`, `tool.started` / `tool.completed` / `tool.failed {tool_name, preview, args}`, `error {message}`, `run.completed`, and the clarify events below. Frames carry `run_id`; Stop aborts the fetch and calls `POST /v1/runs/{run_id}/stop`.
 
-    User->>UI: Types prompt & clicks Send (or Enter)
-    UI->>UI: Append User message bubble to thread
-    UI->>UI: Clear draft in localStorage (hermes-uplink-draft-*)
-    UI->>UI: Generate turnId = crypto.randomUUID()
-    UI->>UI: Set streaming = true, update Ring to Stop (■)
-    UI->>Proxy: POST /api/sessions/{id}/chat/stream<br/>Header: Idempotency-Key: <turnId><br/>Header: X-Client-Turn-ID: <turnId><br/>Body: {"input": "...", "client_turn_id": "<turnId>"}
-    Proxy->>Proxy: Validate session cookie & acquire PROXY_SEMAPHORE (max 32)
-    Proxy->>API: Forward POST with Injected Bearer Key & Idempotency Headers
-    API->>Worker: Spawn / Resume agent turn loop
-    API-->>Proxy: 200 OK (Content-Type: text/event-stream)
-    Proxy-->>UI: 200 OK (Connection: close, Text/Event-Stream)
+Streams are tracked per session (`streams` map). Leaving a session parks its thread nodes in a detached holder, the stream keeps writing there, and the session row shows "new reply" or "question waiting" until the user returns. `localThread` marks threads holding stream-built content so passive refreshes do not overwrite them.
 
-    loop Event Pump
-        Worker->>API: Yield delta / event
-        API-->>Proxy: data: {"type": "assistant.delta", "content": "..."}
-        Proxy-->>UI: Stream chunk forwarded verbatim
-        UI->>UI: handleFrame() -> Append text to assistant markdown bubble
-    end
+Clarify (interactive questions) is specified in [docs/clarify-protocol.md](docs/clarify-protocol.md).
 
-    alt Tool Execution Occurs
-        Worker->>API: Tool started
-        API-->>UI: data: {"type": "tool.started", "tool_name": "execute_code"}
-        UI->>UI: Render expandable Tool Call widget (<details class="msg tool">)
-        Worker->>API: Tool completed
-        API-->>UI: data: {"type": "tool.completed", "result": "..."}
-        UI->>UI: Populate Tool output block
-    end
+## Client state
 
-    Worker->>API: Turn completed
-    API-->>Proxy: data: {"type": "run.completed", "context_used": 4200, "context_limit": 32768}
-    Proxy-->>UI: Final frame forwarded
-    UI->>UI: applyContextFrom() -> Update Context Ring (#ring)
-    UI->>UI: Set streaming = false, update Ring to Send (▶)
-```
+- **Sidebar:** a drawer below 768 px or in portrait; pinnable at ≥1024 px or ≥768 px landscape (preference in `localStorage`, applied synchronously to avoid layout shift). The main header collapses to two rows plus a More menu by container width.
+- **Drafts:** saved per session in `localStorage`; cleared only once a stream is established; reconciled against history so a send that reached the server is not repeated.
+- **Last-render cache:** `sessionRenderCache` per session; a failed history fetch never blanks an existing thread.
+- **Unread:** the session list carries `unread`; opening a session PATCHes `{unread:false}` after history loads. A local write guard (10 s) stops a stale list page from flipping it back. Design: [docs/mobile-edge-ux-and-session-status-spec.md](docs/mobile-edge-ux-and-session-status-spec.md).
+- **Direct mode:** Settings may point at an external HTTPS (or loopback HTTP) server with a Bearer key stored in `localStorage`; the passphrase flow works only against the same-origin proxy.
 
----
+## Security model
 
-### 3.3 Interactive Clarify (Multiple-Choice) Protocol Flow
+| Threat | Control |
+|---|---|
+| Unauthenticated public ingress | Funnel terminates TLS; proxy passphrase gate with constant-time compare and attempt limiting |
+| API key exfiltration | Key stays in the proxy process; the browser holds only an opaque cookie |
+| Tampered or injected scripts | Digest-pinned files; CSP `default-src 'none'`, `script-src 'strict-dynamic'` with the `app.js` and `marked` digests, `script-src-attr 'none'`; `index.html` loads both scripts with matching SRI |
+| Path traversal in static serving | Fixed file allowlist plus `vendor/` and `assets/` directories, resolved with `realpath` |
+| Host pivoting | Loopback bind only; non-loopback upstreams require `--allow-remote-upstream` and HTTPS |
+| Overwriting another Funnel/Serve config | `matching_uplink_route` refuses any other public route on 443; cleanup disables only a verified Uplink route |
 
-When the agent requires human feedback mid-execution, it emits a `clarify` frame. Uplink presents an interactive card, allowing the user to unblock the agent asynchronously.
+Because of the CSP, UI code must not use inline `<script>`, inline `style=""` attributes or `onclick=""`; use classes and `addEventListener`. CSSOM writes such as `style.setProperty` are allowed.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant UI as index.html (Clarify Card)
-    participant Proxy as proxy.py
-    participant API as api_server.py
-    participant Gateway as tools.clarify_gateway
-    participant Worker as Agent Worker Thread
+## Funnel lifecycle
 
-    Worker->>API: Agent invokes clarify(question, choices, urgency)
-    API->>Gateway: register(clarify_id, session_key, question, choices)
-    API-->>Proxy: SSE Frame: event: clarify\ndata: {"clarify_id": "c1", "choices": [...], "urgency": "medium"}
-    Proxy-->>UI: SSE event: clarify delivered
-    API->>Worker: wait_for_response(clarify_id) [Blocks Worker Thread]
+`launch_internet.bat start` calls `internet_access.py start`, which: ensures the local proxy is healthy (starting `launch_local.bat` if not), loads the passphrase, ensures Tailscale is signed in (opening the consent URL it prints), reads `tailscale funnel status --json`, and either accepts the existing Uplink route, fails closed on a foreign route, or runs `tailscale funnel --bg --yes --https=443 http://127.0.0.1:<port>` and re-verifies. `status` and `cleanup` use the same ownership check.
 
-    UI->>UI: renderClarifyCard() -> Mount interactive card in thread
-    UI->>UI: Start live countdown timer (if urgency != "blocking")
+## Operations
 
-    alt Path A: User Selects Option / Types Response
-        User->>UI: Clicks Choice (e.g. "B") or Types "Other"
-        UI->>Proxy: POST /api/sessions/{id}/clarify/respond {"clarify_id": "c1", "answer": "B"}
-        Proxy->>API: POST /api/sessions/{id}/clarify/respond (Bearer Injected)
-        API->>Gateway: resolve_gateway_clarify("c1", "B")
-        Gateway-->>API: Resolved = True
-        API-->>Proxy: 200 OK {"ok": true, "status": "resolved"}
-        Proxy-->>UI: 200 OK
-        Gateway-->>Worker: Returns "B" (Unblocks Worker Thread)
-        UI->>UI: settleClarifyCard() -> Replace buttons with settled badge
-    else Path B: User Types New Message in Composer (Implicit Skip)
-        User->>UI: Types fresh prompt in bottom composer & hits Enter
-        UI->>Proxy: POST /api/sessions/{id}/clarify/respond {"clarify_id": "c1", "answer": ""}
-        Proxy->>API: Forwarded to Gateway -> Unblocks Worker with empty string
-        UI->>Proxy: POST /api/sessions/{id}/chat/stream (New Turn Prompt)
-    else Path C: Mobile Disconnect & Tab Refocus Recovery
-        Note over UI,API: Mobile screen locked or network dropped
-        User->>UI: Refocus tab / Unlock phone
-        UI->>Proxy: GET /api/sessions/{id}/clarify/pending
-        Proxy->>API: Query pending clarify for session
-        API-->>UI: 200 OK {"pending": true, "clarify": {"clarify_id": "c1", ...}}
-        UI->>UI: Re-mount / Re-hydrate interactive card
-    end
-
-    Worker->>API: Continues execution using chosen response
-    API-->>UI: SSE data: {"type": "assistant.delta", ...}
-```
-
----
-
-### 3.4 Internet Access & Tailscale Funnel Control Lifecycle
-
-The internet access subsystem ensures zero-credential exposure and strict route ownership verification.
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Admin as Host Operator
-    participant Bat as launch_internet.bat
-    participant Py as internet_access.py
-    participant Proxy as proxy.py (:8787)
-    participant TS_CLI as Tailscale CLI (tailscale.exe)
-    participant TS_Web as Tailscale Consent Browser
-
-    Admin->>Bat: Runs launch_internet.bat
-    Bat->>Py: Executes internet_access.py start
-    Py->>Proxy: Probe is_local_proxy_healthy(8787)
-    
-    alt Proxy is Down
-        Py->>Bat: Invoke launch_local.bat asynchronously
-        Py->>Py: Poll until 127.0.0.1:8787 returns 200 & Server: HermesUplink
-    end
-
-    Py->>Py: load_passphrase() from .uplink-pass.txt
-    Py->>TS_CLI: tailscale status --json
-    TS_CLI-->>Py: Return BackendState ("Running" or "NeedsLogin")
-    
-    opt Tailscale Not Signed In
-        Py->>TS_CLI: tailscale up (Interactive Runner)
-        TS_CLI-->>Py: Output contains https://login.tailscale.com/...
-        Py->>TS_Web: Auto-open browser consent URL
-        Admin->>TS_Web: Complete browser login
-    end
-
-    Py->>TS_CLI: tailscale funnel status --json
-    TS_CLI-->>Py: Return current Web and Service routes
-    Py->>Py: matching_uplink_route() -> Verify if port 443 points to 127.0.0.1:8787
-
-    alt Route Already Exists & Owned
-        Py->>Admin: Display verified HTTPS URL & Passphrase
-    else Unrelated Route Detected on 443
-        Py-->>Admin: FAIL CLOSED: "Port 443 already configured for another service; refusing to overwrite."
-    else No Route Configured
-        Py->>TS_CLI: tailscale funnel --bg --yes --https=443 http://127.0.0.1:8787
-        TS_CLI-->>Py: Configure route in background
-        Py->>TS_CLI: tailscale funnel status --json (Verify ownership)
-        Py->>Admin: Print Stable URL (https://*.ts.net/) & Copy to Clipboard
-    end
-```
-
----
-
-### 3.5 Client Layout Engine, Draft Reconciliation & Connection Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> DeviceCheck
-    DeviceCheck --> FlyoutDrawer: Portrait or Width < 768px
-    DeviceCheck --> PinnableDesktop: Landscape >= 768px or Width >= 1024px
-
-    state PinnableDesktop {
-        [*] --> CheckPref
-        CheckPref --> DockedPinned: Stored Pref = true (or default >= 1024px)
-        CheckPref --> FlyoutOverlay: Stored Pref = false
-
-        DockedPinned --> FlyoutOverlay: User clicks #pinSidebarBtn (Unpin)
-        FlyoutOverlay --> DockedPinned: User clicks #pinSidebarBtn (Pin)
-    }
-
-    state FlyoutOverlay {
-        [*] --> Hidden
-        Hidden --> Visible: #menuBtn clicked
-        Visible --> Hidden: Session selected, Scrim clicked, or Escape key
-    }
-```
-
-#### 1. Orientation-Gated Sidebar Pinning
-- **Media Query Gating:** Evaluated via `(min-width: 1024px), (min-width: 768px) and (orientation: landscape)`. On mobile phones or portrait tablets, the sidebar is strictly an overlay flyout drawer and the pin button is hidden from view (`display: none !important`).
-- **Zero-CLS Pre-Paint:** `applySidebarState()` executes synchronously on script initialization to set `.sidebar-pinned` on `document.body` prior to initial paint, eliminating Cumulative Layout Shift.
-- **Auto-Dismiss Invariants:** In flyout mode, clicking an item in `.sess`, tapping the `#scrim` backdrop, or pressing the `Escape` key automatically closes the drawer and dismisses the scrim. In pinned mode, `#menuBtn` and `#scrim` are completely hidden.
-
-#### 2. Session Switching Isolation & Draft Reconciliation
-- **Pre-Render Isolation:** `currentRenderedSessionId` tracks the thread currently attached to the DOM. When opening a new session, the thread is immediately pre-rendered from `sessionRenderCache` or cleared before fetching history, preventing previous session messages from persisting during network lag.
-- **Draft & Turn ID Lifecycle:** When composing a message, drafts are saved to `localStorage` keyed by session ID (`hermes-uplink-draft-{id}`). When `send()` triggers, an idempotency turn ID UUID is generated and persisted (`hermes-uplink-turn-{id}`). If the network drops or stream creation fails, both the draft text and the identical turn ID are restored to the input box.
-- **History Reconciliation:** Upon successful history retrieval (`reconcileDraftWithMessages`), the client checks if the latest user turn in history matches the pending draft. If matched, the stored draft and turn ID are evicted, avoiding duplicate sends.
-
-#### 3. SSE Keepalive Comment Heartbeats
-- `proxy.py` monitors the upstream stream socket using `select.select()` with a 15-second timeout (`SSE_KEEPALIVE_INTERVAL`). If upstream has remained silent for 15 seconds, a raw SSE comment (`: ping\n\n`) is written and flushed to the client.
-- The browser client's SSE frame processor discards comment frames immediately (`if(frame.startsWith(":")) return;`), ensuring long-running reasoning or tool turns are not terminated by aggressive cellular CGNAT or middlebox TCP connection timeouts.
-
----
-
-## 4. Module & File Inventory Matrix
-
-The table below catalogs every component in the repository, defining its runtime role, communication contracts, upstream/downstream dependencies, and failure handling strategy.
-
-| File / Component | Primary Responsibility | Upstream / Inputs | Downstream / Outputs | Concurrency & Security Invariants |
-| :--- | :--- | :--- | :--- | :--- |
-| [`proxy.py`](file:///e:/hermes-uplink/proxy.py) | Loopback reverse proxy, authentication gate, and asset integrity firewall. | Inbound HTTP from Edge / Tailscale; `.uplink-key.txt`, `.uplink-pass.txt`. | Hermes API Server (`http://127.0.0.1:8642`), Edge Client responses. | • Binds strictly to `127.0.0.1`.<br/>• SHA-256 asset hash enforcement.<br/>• Forwards `Idempotency-Key` and `X-Client-Turn-ID`.<br/>• SSE keepalive comment injection (15s `: ping`).<br/>• Semaphores: Max 32 active proxy requests, 128 connections.<br/>• Auth Rate Limiting: 10 failures / 60s per IP. |
-| [`internet_access.py`](file:///e:/hermes-uplink/internet_access.py) | Tailscale Funnel manager, status parser, conflict guard, and interactive setup. | CLI arguments, `tailscale.exe status/funnel --json`, local proxy health. | Tailscale daemon configuration, console status output. | • Validates `.ts.net` hostname regex.<br/>• Refuses to overwrite foreign port 443 routes.<br/>• Never stores credentials in checkout. |
-| [`index.html`](file:///e:/hermes-uplink/index.html) | Single-page thin client, chat UI, markdown presenter, clarify card handler, model selector. | User DOM events, REST/SSE from `proxy.py`, `localStorage`. | Rendered DOM, outgoing REST/SSE requests, clipboard operations. | • Zero build step.<br/>• Non-destructive last-render thread cache (`sessionRenderCache`) with pre-render isolation.<br/>• Orientation-gated sidebar pinning & CLS-free pre-paint.<br/>• Draft-bound turn idempotency UUID lifecycle.<br/>• Composer draft autosave in `localStorage` & history reconciliation.<br/>• Online/offline banner & auto-recovery.<br/>• Battery-friendly focus-based synchronization. |
-| [`sw.js`](file:///e:/hermes-uplink/sw.js) | Progressive Web App service worker for offline shell installation. | Browser service worker lifecycle events. | Cache storage (`uplink-shell-v2`), fetches `vendor/marked.umd.js`, `manifest.webmanifest`. | • Never caches `index.html` or `/api/*` to eliminate stale UI state drifts. |
-| [`console_utils.py`](file:///e:/hermes-uplink/console_utils.py) | Windows console QuickEdit mode enabler. | Win32 `kernel32.dll` via `ctypes`. | Console input buffer flags. | • Safe no-op on non-Windows platforms or non-interactive stdout. |
-| [`launch_local.bat`](file:///e:/hermes-uplink/launch_local.bat) | Windows batch script for local configuration, credential generation, and service management. | User CLI, `hermes config`, environment variables. | Writes `.uplink-key.txt`, `.uplink-pass.txt`, launches `proxy.py`. | • Idempotent first-run initialization.<br/>• Validates API key and passphrase formats.<br/>• Restarts Hermes gateway gracefully. |
-| [`launch_internet.bat`](file:///e:/hermes-uplink/launch_internet.bat) | Entrypoint wrapper for Tailscale Funnel internet access. | User CLI invocation. | Calls `internet_access.py`. | • Pauses on non-zero exit codes to preserve diagnostic output. |
-| [`autostart.vbs`](file:///e:/hermes-uplink/autostart.vbs) | Silent logon launcher for background proxy execution. | Windows Startup folder execution. | Launches `pythonw.exe proxy.py` with hidden window. | • Validates credential formats prior to process spawn. |
-| [`service.ps1`](file:///e:/hermes-uplink/service.ps1) | Background service status and process termination manager. | `.uplink.pid`, `Get-CimInstance Win32_Process`. | Console status, process kill signal. | • Verifies process command line contains `proxy.py` before issuing `Stop-Process`. |
-| [`tests/test_proxy.py`](file:///e:/hermes-uplink/tests/test_proxy.py) | Integration test suite for proxy security, auth, SSE, and CSP. | Mock upstream `ThreadingHTTPServer`. | Unit test assertions. | • Fully automated, self-contained, no external network dependencies. |
-| [`tests/test_internet_access.py`](file:///e:/hermes-uplink/tests/test_internet_access.py) | Unit test suite for Funnel route parsing and conflict logic. | Mock runner (`FakeRunner`). | Unit test assertions. | • Exercises nested JSON payloads, malformed inputs, and route conflicts. |
-
----
-
-## 5. Wire Protocols & Contract Specifications
-
-### 5.1 Local Proxy & Gateway Endpoint Routing Matrix
-
-```
-Client (Edge Browser)
-       │
-       ├── POST /__auth                     ──> Handled by proxy.py (Session creation)
-       ├── POST /__logout                   ──> Handled by proxy.py (Session termination)
-       ├── GET  /                           ──> Handled by proxy.py (Serves index.html)
-       ├── GET  /vendor/marked.umd.js       ──> Handled by proxy.py (Serves vendored parser)
-       ├── GET  /sw.js                      ──> Handled by proxy.py (Serves service worker)
-       ├── GET  /manifest.webmanifest       ──> Handled by proxy.py (Serves PWA manifest)
-       ├── GET  /assets/*                   ──> Handled by proxy.py (Serves icons)
-       │
-       └── [Authenticated by Session Cookie]
-             │
-             ├── GET  /health                                 ──> Forwarded to api_server.py (:8642)
-             ├── GET  /api/sessions                           ──> Forwarded to api_server.py (:8642)
-             ├── POST /api/sessions                           ──> Forwarded to api_server.py (:8642)
-             ├── GET  /api/sessions/{id}/messages             ──> Forwarded to api_server.py (:8642)
-             ├── POST /api/sessions/{id}/chat/stream (SSE)    ──> Forwarded to api_server.py (:8642)
-             ├── GET  /api/sessions/{id}/clarify/pending      ──> Forwarded to api_server.py (:8642)
-             ├── POST /api/sessions/{id}/clarify/respond      ──> Forwarded to api_server.py (:8642)
-             ├── GET  /api/model/options                      ──> Forwarded to api_server.py (:8642)
-             └── POST /api/sessions/{id}/model                ──> Forwarded to api_server.py (:8642)
-```
-
----
-
-### 5.2 Server-Sent Events (SSE) Wire Frame Specifications
-
-#### Request Contract: `POST /api/sessions/{id}/chat/stream`
-* **HTTP Headers:**
-  * `Content-Type: application/json`
-  * `Idempotency-Key: <UUID>` *(Forwarded to upstream)*
-  * `X-Client-Turn-ID: <UUID>` *(Forwarded to upstream)*
-* **JSON Body Payload:**
-  ```json
-  {
-    "input": "User prompt text",
-    "client_turn_id": "<UUID>"
-  }
-  ```
-
-Over `/api/sessions/{id}/chat/stream`, responses are framed as standard SSE (`text/event-stream`):
-
-#### Event: `assistant.delta` (Text streaming)
-```json
-{
-  "type": "assistant.delta",
-  "content": "To configure PostgreSQL on Windows..."
-}
-```
-
-#### Event: `tool.started` (Tool execution initiation)
-```json
-{
-  "type": "tool.started",
-  "tool_name": "execute_code",
-  "tool_args": {"language": "powershell", "code": "Get-Service"}
-}
-```
-
-#### Event: `tool.completed` (Tool execution result)
-```json
-{
-  "type": "tool.completed",
-  "tool_name": "execute_code",
-  "result": "Status: Running\nName: Tailscale"
-}
-```
-
-#### Event: `clarify` (Interactive question prompt)
-```json
-{
-  "type": "clarify",
-  "clarify_id": "c1a2b3c4d5",
-  "session_id": "s1",
-  "question": "Which database engine would you like to use?",
-  "choices": ["PostgreSQL (Recommended)", "SQLite", "MySQL"],
-  "multi_select": false,
-  "urgency": "medium",
-  "timeout_seconds": 300,
-  "created_at": 1756598400.0,
-  "questions": null
-}
-```
-
-#### Event: `run.completed` (Turn finalization & context metrics)
-```json
-{
-  "type": "run.completed",
-  "context_used": 5420,
-  "context_limit": 32768,
-  "occupancy_pct": 16.5,
-  "finish_reason": "stop"
-}
-```
-
----
-
-### 5.3 Clarify Transport & Interactive Resolution Contract
-
-The interactive clarification system decouples downstream notification (SSE event) from upstream resolution (dedicated HTTP RPC). This eliminates stream multiplexing collisions and 409 turn-lease locks.
-
-#### Dedicated Clarify Endpoints
-
-1. **Resolution RPC:** `POST /api/sessions/{session_id}/clarify/respond`
-   - **Request Headers:** `Content-Type: application/json`, `Cookie: hermes_uplink_session=...` (Proxy attaches upstream `Authorization: Bearer <KEY>`).
-   - **Request Body:**
-     ```json
-     {
-       "clarify_id": "c1a2b3c4d5",
-       "answer": "PostgreSQL"
-     }
-     ```
-     *(For multi-select, `answer` is serialized JSON array `["A", "B"]`; for composite batches, serialized object `{"answers": {"q0": "A", "q1": "B"}}`; for empty/skip, `""`).*
-   - **Responses:**
-     - `200 OK {"ok": true, "clarify_id": "c1a2b3c4d5", "status": "resolved"}`: Successfully unblocks agent worker thread.
-     - `409 Conflict {"error": {"message": "Clarify request has expired or was already resolved", "code": "clarify_expired"}}`: First-writer-wins race resolution (e.g. user answered on Telegram or timer expired); client UI settles card gracefully.
-
-2. **Mobile Reconnection Recovery Probe:** `GET /api/sessions/{session_id}/clarify/pending`
-   - **Trigger:** Fired by client on `window.focus` and `document.visibilitychange` to restore active card if phone slept or SSE dropped mid-turn.
-   - **Responses:**
-     - Pending: `200 OK {"pending": true, "clarify": {"clarify_id": "...", "question": "...", "choices": [...], "urgency": "medium"}}`
-     - Idle / Completed: `200 OK {"pending": false}`
-
-#### UI Card Lifecycle States & Behaviors
-
-- **Pending State (`.clarify-card.pending`):** Renders question header, urgency badge (`low`, `medium`, `high`, `blocking`), live countdown timer (auto-resolves on expiry), and input controls (single-select hotkey buttons `A..D` / `1..N`, multi-select checkboxes, or auto-focused "Other" free-text input).
-- **Composite Batch Form:** When `questions: [...]` array is present, renders separate numbered groups with progress tracking and a single "Submit All Answers" dispatch.
-- **Settled State (`.clarify-card.settled`):** Replaces interactive buttons with an immutable summary containing the question title and answer badge (or *(Skipped)* representation).
-- **Composer Deadlock Breaker:** If a user types a new prompt into the bottom composer while a clarify card is active, `send()` automatically fires an empty-string skip RPC (`answer: ""`) to unblock the agent worker before streaming the new turn.
-
----
-
-## 6. Security Architecture & Threat Model
-
-```
-┌────────────────────────────────────────────────────────────────────────────────────────────────────────┐
-│                                       SECURITY CONTROLS MATRIX                                         │
-├───────────────────────────────┬───────────────────────────────────┬────────────────────────────────────┤
-│ Threat Vector                 │ Mitigation Mechanism              │ Enforcement Point                  │
-├───────────────────────────────┼───────────────────────────────────┼────────────────────────────────────┤
-│ 1. Public Port Scanning &     │ • Tailscale Funnel HTTPS ingress. │ • Tailscale edge infrastructure.   │
-│    Unauthenticated Ingress    │ • Application Passphrase Gate.    │ • proxy.py /__auth endpoint.       │
-│                               │ • Rate limit: 10 failures / 60s.  │ • Constant-time compare_digest.    │
-├───────────────────────────────┼───────────────────────────────────┼────────────────────────────────────┤
-│ 2. API Key Exfiltration       │ • Bearer token stays in host OS.  │ • proxy.py injects header; browser │
-│                               │ • Never transmitted to client.    │   receives only opaque cookie.     │
-├───────────────────────────────┼───────────────────────────────────┼────────────────────────────────────┤
-│ 3. Static Asset Tampering /   │ • Hardcoded SHA-256 digests.      │ • proxy.py _validate_pinned_assets │
-│    Malicious Script Injection │ • Strict Content Security Policy. │ • Strict-dynamic CSP hashes.       │
-├───────────────────────────────┼───────────────────────────────────┼────────────────────────────────────┤
-│ 4. Host Network Pivoting      │ • Loopback bind only (127.0.0.1). │ • UplinkServer socket bind.        │
-│                               │ • Direct mode forbids plain HTTP. │ • client connectionBase() checks.  │
-├───────────────────────────────┼───────────────────────────────────┼────────────────────────────────────┤
-│ 5. Accidental Route Override  │ • Port 443 ownership checks.      │ • internet_access.py               │
-│                               │ • Refuses multi-route conflicts.  │   matching_uplink_route()          │
-└───────────────────────────────┴───────────────────────────────────┴────────────────────────────────────┘
-```
-
-### Static Asset Hash Verification Matrix
-`proxy.py` enforces startup validation of all served assets. If any byte changes on disk without updating the pinned hashes, the proxy fails closed immediately:
-
-```python
-PINNED_ASSET_HASHES = {
-    "index.html": "7Cpx8AEmZkNxjArQycZkyLWD8+FJVCF9Ep7qLHG7sPk=",
-    "vendor/marked.umd.js": "AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=",
-    "sw.js": "KN3cJrmqGrA4FoLawEWBBDZfXIR7rX66PcM3M4u/eAo=",
-}
-INLINE_SCRIPT_HASH = "yVYZEDGR+/1nj0eRI4K497ygfp9XhNT811UUIkmMwwo="
-INLINE_STYLE_HASH = "sOFvTL342oglar4dvIsZHxzZ6zTej417d+htjyCYSTQ="
-```
-
----
-
-## 7. Operational Runbook & Verification Commands
-
-### Static Asset Hash Maintenance
-When editing [`index.html`](file:///e:/hermes-uplink/index.html) or other static assets:
+After editing `index.html`, `app.js`, `app.css` or `sw.js`:
 
 ```powershell
-# Check for asset digest drift
-python proxy.py --check-hashes
-
-# Atomically recalculate and update pinned hashes in proxy.py
-python proxy.py --update-hashes
-```
-
-### Local Micro-Verification
-To run the complete automated test suite without spinning up Tailscale or Hermes Gateway:
-
-```powershell
-# Run all unit and integration tests
+python proxy.py --update-hashes   # rewrites pinned-hashes.json and index.html's SRI digests
+python proxy.py --check-hashes    # exit 1 on drift
 python -m unittest discover -s tests -v
 ```
 
-### Manual Host Diagnostics
+Text assets are hashed and served with LF line endings, so a CRLF checkout does not break SRI. Manual probes:
+
 ```powershell
-# 1. Probe Gateway Health directly
-curl -s http://127.0.0.1:8642/health
-
-# 2. Probe Proxy unauthenticated (Should return 401)
-curl -s -i http://127.0.0.1:8787/api/sessions
-
-# 3. Check Background Proxy Service status
-powershell -NoProfile -ExecutionPolicy Bypass -File .\service.ps1 -Action status -Port 8787
-
-# 4. Check Tailscale Funnel & Gateway Status
+curl -s http://127.0.0.1:8642/health                       # gateway
+curl -s -i http://127.0.0.1:8787/api/sessions              # expect 401
+powershell -NoProfile -File .\service.ps1 -Action status -Port 8787
 python internet_access.py status
 ```
