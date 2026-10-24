@@ -77,6 +77,8 @@ flowchart LR
 - **Full Session Sync:** Lists sessions from the shared Hermes store and resumes existing work.
 - **Battery-Friendly Auto-Refresh:** Refreshes when the tab gains focus or becomes visible.
 - **Real-time Streaming:** Supports streaming turns via Server-Sent Events.
+- **Interactive Questions:** Answers the agent's clarify prompts from the browser: single choice, multi-select, free text, or a batch of questions ([protocol](docs/clarify-protocol.md)).
+- **Unread Markers:** Shows which sessions have new activity, including work done from other clients ([details](docs/session-status.md)).
 - **Tool Discovery:** Discovers skills and toolsets through Hermes API endpoints.
 - **Custom UI:** Mobile-responsive three-pane interface with orientation-gated sidebar pinning and a Hermes-amber theme.
 - **Installable App (PWA):** Use "Add to Home Screen" on iOS/Android for a fullscreen, native app-like experience.
@@ -159,7 +161,23 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 - **Single shared credential:** The passphrase grants full access; there are no per-user accounts or roles.
 - **Edge search:** Session filtering covers title and source, not message content.
 
+## Documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md): components, request flows, security model, operations.
+- [docs/clarify-protocol.md](docs/clarify-protocol.md): how interactive agent questions travel between gateway and client.
+- [docs/session-status.md](docs/session-status.md): mobile header, unread indicators, and the planned activity status.
+
 ## Development and Verification
+
+The repository is small and has no build step:
+
+| Path | Contents |
+|---|---|
+| `proxy.py`, `internet_access.py`, `uplink_setup.py`, `uplink_common.py` | Python, standard library only |
+| `web/` | The client the proxy serves |
+| `launch_local.bat`, `launch_internet.bat` | Entry points |
+| `windows/` | Login auto-start and service helpers |
+| `tests/` | `unittest` suites |
 
 Run the local unit tests with:
 
@@ -167,7 +185,7 @@ Run the local unit tests with:
 python -m unittest discover -s tests -v
 ```
 
-After editing `index.html`, `app.js`, `app.css` or `sw.js`, run `python proxy.py --update-hashes`; the proxy refuses to start while the pinned digests in `pinned-hashes.json` are stale.
+After editing a pinned file in `web/` (`index.html`, `app.js`, `app.css`, `sw.js`, `vendor/marked.umd.js`), run `python proxy.py --update-hashes`; the proxy refuses to start while the digests in `web/pinned-hashes.json` are stale.
 
 The proxy tests cover authentication, cookie sessions, API-key injection, SSE responses, malformed requests, pinned-asset integrity, and loopback validation. Internet-access tests use a fake Tailscale command runner and do not require a Tailscale account.
 

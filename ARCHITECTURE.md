@@ -28,20 +28,21 @@ flowchart TB
     PROXY -- "HTTP + Bearer key" --> GW --> STORE
 ```
 
-| File | Role |
+| Path | Role |
 |---|---|
 | [proxy.py](proxy.py) | Reverse proxy, auth gate, static server, digest verification |
-| [pinned-hashes.json](pinned-hashes.json) | Pinned SHA-256 digests of every served script/page/style (written by `--update-hashes`) |
-| [uplink_common.py](uplink_common.py) | Defaults and health-probe header shared by the two Python entry points |
 | [internet_access.py](internet_access.py) | Tailscale Funnel lifecycle: status parsing, ownership guard, consent URL handling |
-| [console_utils.py](console_utils.py) | Re-enables QuickEdit selection in the Windows console |
-| [index.html](index.html), [app.css](app.css), [app.js](app.js) | Client markup, styles, logic |
-| [sw.js](sw.js), [manifest.webmanifest](manifest.webmanifest) | PWA installability; the worker caches only the manifest, itself and `marked`, and never `index.html` or API calls |
-| [launch_local.bat](launch_local.bat) | Configures Hermes, generates `.uplink-key.txt` / `.uplink-pass.txt`, restarts the gateway, runs the proxy; also `install`/`start`/`stop`/`status` for login auto-start |
-| [autostart.vbs](autostart.vbs), [service.ps1](service.ps1) | Headless start at login; PID-checked stop/status |
+| [uplink_setup.py](uplink_setup.py) | First-run setup: validates settings, creates credentials, configures and restarts the Hermes gateway |
+| [uplink_common.py](uplink_common.py) | Defaults, credential-file handling and the Windows console helper shared by the above |
+| [web/](web/) | The client, served by the proxy: `index.html`, `app.js`, `app.css`, `sw.js`, `manifest.webmanifest`, `vendor/marked.umd.js`, `assets/` |
+| [web/pinned-hashes.json](web/pinned-hashes.json) | Pinned SHA-256 digests of every served page, script and stylesheet (written by `--update-hashes`) |
+| [launch_local.bat](launch_local.bat) | Runs setup then the proxy in the foreground; `install` / `start` / `stop` / `status` manage login auto-start |
 | [launch_internet.bat](launch_internet.bat) | Wrapper for `internet_access.py` |
+| [windows/](windows/) | `autostart.vbs` (headless start at login) and `service.ps1` (PID-checked stop/status) |
 
-The proxy takes the API key and passphrase from the `HERMES_API_KEY` and `UPLINK_PASSPHRASE` environment variables; the launchers read them from the git-ignored secret files.
+`sw.js` exists mainly to make the app installable: it caches only the manifest, itself and `marked`, never `index.html`, `app.js` or API calls.
+
+The proxy takes the API key and passphrase from the `HERMES_API_KEY` / `UPLINK_PASSPHRASE` environment variables, falling back to the git-ignored `.uplink-key.txt` / `.uplink-pass.txt` that `uplink_setup.py` creates. Credential formats are validated in one place, `uplink_common.py`.
 
 ## Authentication and sessions
 
@@ -78,7 +79,7 @@ Clarify (interactive questions) is specified in [docs/clarify-protocol.md](docs/
 - **Sidebar:** a drawer below 768 px or in portrait; pinnable at ≥1024 px or ≥768 px landscape (preference in `localStorage`, applied synchronously to avoid layout shift). The main header collapses to two rows plus a More menu by container width.
 - **Drafts:** saved per session in `localStorage`; cleared only once a stream is established; reconciled against history so a send that reached the server is not repeated.
 - **Last-render cache:** `sessionRenderCache` per session; a failed history fetch never blanks an existing thread.
-- **Unread:** the session list carries `unread`; opening a session PATCHes `{unread:false}` after history loads. A local write guard (10 s) stops a stale list page from flipping it back. Design: [docs/mobile-edge-ux-and-session-status-spec.md](docs/mobile-edge-ux-and-session-status-spec.md).
+- **Unread:** the session list carries `unread`; opening a session PATCHes `{unread:false}` after history loads. A local write guard (10 s) stops a stale list page from flipping it back. Details and the planned activity status: [docs/session-status.md](docs/session-status.md).
 
 ## Security model
 
@@ -86,7 +87,7 @@ Clarify (interactive questions) is specified in [docs/clarify-protocol.md](docs/
 |---|---|
 | Unauthenticated public ingress | Funnel terminates TLS; proxy passphrase gate with constant-time compare and attempt limiting |
 | API key exfiltration | Key stays in the proxy process; the browser holds only an opaque cookie |
-| Tampered or injected scripts | Digest-pinned files; CSP `default-src 'none'`, `connect-src 'self'`, `script-src 'strict-dynamic'` with the `app.js` and `marked` digests, `script-src-attr 'none'`; `index.html` loads both scripts with matching SRI |
+| Tampered or injected scripts | Digest-pinned files; CSP `default-src 'none'`, `connect-src 'self'`, `script-src 'strict-dynamic'` with the `app.js` and `marked` digests, `script-src-attr 'none'`; `web/index.html` loads both scripts with matching SRI |
 | Path traversal in static serving | Fixed file allowlist plus `vendor/` and `assets/` directories, resolved with `realpath` |
 | Host pivoting | Loopback bind only; non-loopback upstreams require `--allow-remote-upstream` and HTTPS |
 | Overwriting another Funnel/Serve config | `matching_uplink_route` refuses any other public route on 443; cleanup disables only a verified Uplink route |
@@ -99,10 +100,10 @@ Because of the CSP, UI code must not use inline `<script>`, inline `style=""` at
 
 ## Operations
 
-After editing `index.html`, `app.js`, `app.css` or `sw.js`:
+After editing anything in `web/` that the proxy pins (`index.html`, `app.js`, `app.css`, `sw.js`, `vendor/marked.umd.js`):
 
 ```powershell
-python proxy.py --update-hashes   # rewrites pinned-hashes.json and index.html's SRI digests
+python proxy.py --update-hashes   # rewrites web/pinned-hashes.json and web/index.html's SRI digests
 python proxy.py --check-hashes    # exit 1 on drift
 python -m unittest discover -s tests -v
 ```
@@ -112,6 +113,6 @@ Text assets are hashed and served with LF line endings, so a CRLF checkout does 
 ```powershell
 curl -s http://127.0.0.1:8642/health                       # gateway
 curl -s -i http://127.0.0.1:8787/api/sessions              # expect 401
-powershell -NoProfile -File .\service.ps1 -Action status -Port 8787
+powershell -NoProfile -File .\windows\service.ps1 -Action status -Port 8787
 python internet_access.py status
 ```
