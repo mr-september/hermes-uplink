@@ -2,13 +2,13 @@
 
 # 📡 Hermes Uplink
 
-A near-universal, data-efficient, text-based "thin client" for [Hermes Agent](https://hermes-agent.nousresearch.com/). Hermes Uplink lets you keep your powerful desktop as the central hub—where your project files, curated skills, assets, and ML libraries reside—while directing complex workflows from any mobile or laptop browser (or even some smart fridges if you're into that...).
+A near-universal, data-efficient, text-based "thin client" for [Hermes Agent](https://hermes-agent.nousresearch.com/). Hermes Uplink lets you keep your powerful desktop as the central hub—where your project files, curated skills, assets, and ML libraries reside—while directing complex workflows from any mobile or laptop browser.
 
 Instead of relying on bandwidth-heavy screen sharing or transferring project data to an edge device, Uplink uses a loopback-only proxy behind an HTTPS tunnel. Existing sessions remain visible and resumable, while the Hermes API key stays on the host desktop.
 
 [![GitHub release](https://img.shields.io/github/release/mr-september/hermes-uplink.svg)](https://github.com/mr-september/hermes-uplink/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-yellow.svg)](index.html)
+[![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-yellow.svg)](app.js)
 
 ---
 
@@ -41,7 +41,7 @@ Instead of relying on bandwidth-heavy screen sharing or transferring project dat
 
 ## Design Principles
 
-- **Zero build steps:** The client is a single vanilla HTML/JS file.
+- **Zero build steps:** The client is plain HTML, CSS and JS with one vendored dependency.
 - **Native execution:** Driven by Hermes's first-party API Server running natively on Windows.
 - **Secure architecture:** A loopback-only standard-library proxy keeps the API key on the host desktop; remote access is provided through Tailscale Funnel.
 - **Standalone:** Uplink runs independently of the Hermes-agent UI packages.
@@ -49,13 +49,12 @@ Instead of relying on bandwidth-heavy screen sharing or transferring project dat
 
 ## Architecture
 
-> [!TIP]
-> For the comprehensive multi-resolution C4 architecture specification, runtime sequence flows, wire protocol contracts, and module matrices, see [ARCHITECTURE.md](ARCHITECTURE.md).
+See [ARCHITECTURE.md](ARCHITECTURE.md) for components, flows, the security model and operations.
 
 ```mermaid
 flowchart LR
     subgraph EDGE["Edge device (phone / laptop)"]
-        B[Browser<br/>index.html<br/>vanilla JS, no build]
+        B[Browser<br/>index.html + app.js<br/>vanilla JS, no build]
     end
     subgraph DESKTOP["Home desktop (Windows, native, NO WSL2)"]
         P[proxy.py<br/>loopback HTTP<br/>key injected server-side]
@@ -152,13 +151,13 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 
 ## Limitations
 
-- **Host platform:** The bundled launchers and automated setup support Windows hosts. Native macOS and Linux devices compatibility and validation would be nice.
+- **Host platform:** The bundled launchers and automated setup support Windows hosts only.
 - **Host must stay online:** Remote access stops if the desktop sleeps, reboots before Tailscale reconnects, or the local proxy/gateway stops. After a reboot or login, the Funnel route resumes automatically once Tailscale reconnects, because it is configured with the `--bg` background flag; you do not need to re-run `launch_internet.bat`.
 - **Public exposure:** Anyone who discovers the URL can reach the application authentication gate. **Protect the passphrase and consider the endpoint public.**
-- **UI/theme scope:** Theming support would be nice. Currently hardcoded sizes and colours.
+- **Theming:** sizes and colours are fixed.
 - **File Uploads:** File and image uploads are currently unsupported.
 - **Single shared credential:** The passphrase grants full access; there are no per-user accounts or roles.
-- **Edge search:** Session filtering covers title and source, not full-text message content yet.
+- **Edge search:** Session filtering covers title and source, not message content.
 
 ## Development and Verification
 
@@ -168,7 +167,9 @@ Run the local unit tests with:
 python -m unittest discover -s tests -v
 ```
 
-The proxy tests cover authentication, cookie sessions, API-key injection, SSE responses, malformed requests, and loopback validation. Internet-access tests use a fake Tailscale command runner and do not require a Tailscale account.
+After editing `index.html`, `app.js`, `app.css` or `sw.js`, run `python proxy.py --update-hashes`; the proxy refuses to start while the pinned digests in `pinned-hashes.json` are stale.
+
+The proxy tests cover authentication, cookie sessions, API-key injection, SSE responses, malformed requests, pinned-asset integrity, and loopback validation. Internet-access tests use a fake Tailscale command runner and do not require a Tailscale account.
 
 Before release, perform a live acceptance test from an external network:
 
@@ -187,14 +188,3 @@ Many remote solutions are hard-pegged to specific Hermes versions, require WSL o
 - **Open WebUI:** Robust interface, but maintains an isolated session store.
 - **hermes-webui:** Third-party reimplementation with version compatibility risks.
 - **Official Desktop Remote Backend:** Native UI and theme engine, but full Windows functionality may require a POSIX PTY.
-
----
-
-**Verification Checklist:**
-
-- [ ] `curl http://127.0.0.1:8642/health` → `{"status":"ok"}`
-- [ ] `curl http://127.0.0.1:8787/api/sessions` (no cookie) → **401**
-- [ ] Authenticate through `POST /__auth` and receive **204** plus `Set-Cookie`
-- [ ] Authenticated `/api/sessions` → **200**
-- [ ] `tailscale funnel status --json` shows the Uplink route to `127.0.0.1:8787`
-- [ ] External browser can authenticate and receive a streamed response
