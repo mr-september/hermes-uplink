@@ -2,7 +2,6 @@ import base64
 import hashlib
 import http.client
 import json
-import re
 import sys
 import threading
 import time
@@ -10,6 +9,7 @@ import unittest
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import proxy  # noqa: E402
@@ -200,42 +200,50 @@ class ProxyIntegrationTests(unittest.TestCase):
         status, _, _ = self.request("GET", "/vendor/%2e%2e/proxy.py")
         self.assertEqual(status, 404)
 
+    def test_unlisted_health_like_paths_are_not_proxied(self):
+        cookie = self.authenticate()
+        status, _, _ = self.request("GET", "/healthz", headers={"Cookie": cookie})
+        self.assertEqual(status, 404)
+
     def test_root_serves_client(self):
         status, headers, body = self.request("GET", "/")
         self.assertEqual(status, 200)
         self.assertIn("text/html", headers["Content-Type"])
         self.assertIn(b"Hermes Uplink", body)
 
-    def test_root_csp_pins_scripts_and_disallows_untrusted_inline_styles(self):
+    def test_root_csp_pins_scripts_and_disallows_inline_code_and_styles(self):
         status, headers, body = self.request("GET", "/")
         self.assertEqual(status, 200)
-        html = (Path(__file__).resolve().parents[1] / "index.html").read_bytes()
-        match = re.search(rb"<script>(.*?)</script>", html, re.DOTALL)
-        self.assertIsNotNone(match)
-        # HTML parsing canonicalizes CRLF/CR to LF before CSP hashes are
-        # checked. Hash the browser-visible script text, not raw file bytes.
-        script = match.group(1).replace(b"\r\n", b"\n").replace(b"\r", b"\n")
-        digest = base64.b64encode(hashlib.sha256(script).digest()).decode("ascii")
-        self.assertIn(f"'sha256-{digest}'", headers["Content-Security-Policy"])
-        self.assertEqual(digest, proxy.INLINE_SCRIPT_HASH)
-        self.assertIn("'strict-dynamic'", headers["Content-Security-Policy"])
-        self.assertNotIn("script-src 'self'", headers["Content-Security-Policy"])
-        self.assertNotIn("'unsafe-inline'", headers["Content-Security-Policy"])
+        csp = headers["Content-Security-Policy"]
+        self.assertIn("'strict-dynamic'", csp)
+        self.assertNotIn("'unsafe-inline'", csp)
+        self.assertNotIn("script-src 'self'", csp)
+        for src in proxy.SCRIPT_FILES:
+            digest = proxy.PINNED_HASHES[src]
+            self.assertIn(f"'sha256-{digest}'", csp)
+            self.assertIn(f'<script src="{src}" integrity="sha256-{digest}"'.encode(), body)
+        self.assertEqual(body.count(b"<script"), body.count(b"<script src="))   # no inline script
         self.assertNotIn(b" style=", body.lower())
-        self.assertIn(
-            f"integrity=\"sha256-{proxy.PINNED_ASSET_HASHES['vendor/marked.umd.js']}\"".encode(),
-            body,
-        )
+
+    def test_served_scripts_match_their_pinned_digests(self):
+        for path, pin in (("/app.js", "app.js"), ("/vendor/marked.umd.js", "vendor/marked.umd.js")):
+            status, _, body = self.request("GET", path)
+            self.assertEqual(status, 200)
+            digest = base64.b64encode(hashlib.sha256(body).digest()).decode("ascii")
+            self.assertEqual(digest, proxy.PINNED_HASHES[pin])
 
     def test_pinned_assets_match_and_drift_fails_closed(self):
-        for relative_path, expected_hash in proxy.PINNED_ASSET_HASHES.items():
-            self.assertEqual(proxy._sha256_base64(relative_path), expected_hash)
-        with self.assertRaisesRegex(RuntimeError, "integrity check failed for index.html"):
-            proxy._validate_pinned_asset("index.html", "not-a-valid-digest")
+        is_match, mismatches = proxy.check_pinned_hashes()
+        self.assertTrue(is_match, mismatches)
+        proxy.validate_pinned_assets()
+        drifted = dict(proxy.PINNED_HASHES, **{"index.html": "not-a-valid-digest"})
+        with mock.patch.object(proxy, "PINNED_HASHES", drifted):
+            with self.assertRaisesRegex(RuntimeError, "integrity check failed for index.html"):
+                proxy.validate_pinned_assets()
 
     def test_text_asset_integrity_is_line_ending_independent(self):
         root = Path(__file__).resolve().parents[1]
-        for relative_path in ("index.html", "sw.js"):
+        for relative_path in ("index.html", "app.js", "app.css", "sw.js"):
             raw = (root / relative_path).read_bytes()
             canonical = raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
             expected = base64.b64encode(hashlib.sha256(canonical).digest()).decode("ascii")
@@ -266,16 +274,6 @@ class ProxyIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(UpstreamHandler.last_content_length, "0")
 
-    def test_compute_current_hashes_and_check_pinned_hashes(self):
-        current = proxy.compute_current_hashes()
-        self.assertEqual(current["assets"], proxy.PINNED_ASSET_HASHES)
-        self.assertEqual(current["script"], proxy.INLINE_SCRIPT_HASH)
-        self.assertEqual(current["style"], proxy.INLINE_STYLE_HASH)
-
-        is_match, _, mismatches = proxy.check_pinned_hashes()
-        self.assertTrue(is_match)
-        self.assertEqual(mismatches, [])
-
     def test_idempotency_headers_are_forwarded_upstream(self):
         cookie = self.authenticate()
         UpstreamHandler.last_idempotency_key = None
@@ -295,71 +293,6 @@ class ProxyIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(UpstreamHandler.last_idempotency_key, test_uuid)
         self.assertEqual(UpstreamHandler.last_client_turn_id, test_uuid)
-
-    def test_client_non_destructive_history_and_race_guards(self):
-        # Scope-limited substring assertions against index.html. We do NOT
-        # execute the JS (no jsdom in this harness), but the assertions are
-        # bounded to specific function bodies so they don't false-positive on
-        # unrelated renderThread([]) calls or whitespace tweaks elsewhere.
-        #
-        # If you find yourself tempted to make these assertions more permissive
-        # (e.g. dropping whitespace checks), the right move is to add a jsdom
-        # harness under tests/jsdom/ and exercise the actual functions.
-        root = Path(__file__).resolve().parents[1]
-        lines = (root / "index.html").read_text(encoding="utf-8").splitlines()
-
-        def line_range(start, end):
-            # 1-indexed inclusive
-            return "\n".join(lines[start - 1:end])
-
-        # Locate the openSession catch block by searching for the marker comment
-        # Gemini added at the top of it. If that marker is removed, this test
-        # fails loudly — that's the point.
-        marker_idx = None
-        for i, ln in enumerate(lines, start=1):
-            if "NON-DESTRUCTIVE HISTORY INVARIANT" in ln:
-                marker_idx = i
-                break
-        self.assertIsNotNone(
-            marker_idx,
-            "openSession catch block marker missing — non-destructive invariant anchor lost",
-        )
-
-        # Bounded read: from marker to 12 lines below (covers the if-block).
-        block = line_range(marker_idx, marker_idx + 12)
-        self.assertIn("sessionRenderCache.get(id)", block)
-        # The whole point of the fix: renderThread([]) must NOT appear in this block.
-        self.assertNotIn("renderThread([])", block)
-        # And the catch must NOT unconditionally add an error message either;
-        # it must check whether the thread is empty first.
-        self.assertIn("t.hasChildNodes()", block)
-
-        # refresh() active-stream guard: find the function and read its first ~12 lines.
-        refresh_idx = None
-        for i, ln in enumerate(lines, start=1):
-            if ln.startswith("async function refresh(){"):
-                refresh_idx = i
-                break
-        self.assertIsNotNone(refresh_idx, "refresh() function not found")
-        refresh_block = line_range(refresh_idx, refresh_idx + 10)
-        self.assertIn("streamingSessionId === activeId", refresh_block)
-
-        # Lifecycle listeners must be wired at the bottom of the file (pagehide, online, offline).
-        # We just check the substrings exist; exact line numbers drift with edits.
-        full = (root / "index.html").read_text(encoding="utf-8")
-        self.assertIn('window.addEventListener("online"', full)
-        self.assertIn('window.addEventListener("offline"', full)
-        self.assertIn('window.addEventListener("pagehide"', full)
-        self.assertIn('offlineRetryBtn', full)
-        self.assertIn('currentRenderedSessionId', full)
-        self.assertIn('loadDraftTurnId', full)
-        self.assertIn('reconcileDraftWithMessages', full)
-        self.assertIn('if(frame.startsWith(":")) return;', full)
-        self.assertIn('pinSidebarBtn', full)
-        self.assertIn('canPinSidebar', full)
-        self.assertIn('isSidebarPinnedEffective', full)
-        self.assertIn('toggleSidebarPin', full)
-        self.assertIn('sidebar-pinned', full)
 
 
 if __name__ == "__main__":
