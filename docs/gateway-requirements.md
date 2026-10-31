@@ -25,7 +25,7 @@ Uplink talks to the Hermes API server (the gateway's REST + SSE surface). Core c
 | Turn de-duplication | `Idempotency-Key` and `client_turn_id` on chat/stream | A retried send after a dropped connection can run twice | Not implemented for session streaming; the client already sends both. |
 | Activity status | `activity_state`, `status_updated_at` on session rows | Not implemented in the client either | Planned; see [session-status.md](session-status.md). |
 
-Protocol details for the clarify items are in [clarify-protocol.md](clarify-protocol.md).
+To add the *extension* items to your own Hermes checkout, see [patching-hermes.md](patching-hermes.md). Protocol details for the clarify items are in [clarify-protocol.md](clarify-protocol.md).
 
 ## Compatibility rule
 
