@@ -166,6 +166,7 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): components, request flows, security model, operations.
 - [docs/gateway-requirements.md](docs/gateway-requirements.md): which Hermes gateway features Uplink uses and what happens without each.
+- [docs/patching-hermes.md](docs/patching-hermes.md): a brief for your own Hermes agent to add the optional gateway features locally, if upstream has not merged them.
 - [docs/clarify-protocol.md](docs/clarify-protocol.md): how interactive agent questions travel between gateway and client.
 - [docs/session-status.md](docs/session-status.md): mobile header, unread indicators, and the planned activity status.
 
