@@ -1,4 +1,4 @@
-# Session status, unread state and the mobile header
+# Session status, unread state, and the mobile header
 
 How Uplink shows what is happening in your sessions, what it needs from the Hermes gateway, and what is planned. Sections are marked **Implemented** or **Planned**.
 
@@ -6,10 +6,10 @@ How Uplink shows what is happening in your sessions, what it needs from the Herm
 
 The main header adapts to the width of the main pane, not the viewport, because a phone in landscape pins the sidebar and leaves a narrower pane than the viewport suggests.
 
-- **Wide pane:** one row with the session title, model chip, session-ID chip, connection dot, and the Capabilities, Refresh and Skills/Tools buttons.
-- **Pane ≤ 600 px:** two rows. The first holds the Sessions button and the session title (up to two lines). The second holds the model chip (name plus a provider/default subline, wrapping only at `- _ . :`), the connection dot, and a **More** menu with Capabilities, Copy session ID, Refresh and Skills / Tools.
+- **Wide pane:** one row with the session title, model chip, session-ID chip, connection dot, and the Capabilities, Refresh, and Skills/Tools buttons.
+- **Pane ≤ 600 px:** two rows. The first holds the Sessions button and the session title (up to two lines). The second holds the model chip (name plus a provider/default subline, wrapping only at `- _ . :`), the connection dot, and a **More** menu with Capabilities, Copy session ID, Refresh, and Skills / Tools.
 - **Short viewport (≤ 480 px high, e.g. landscape phone or open keyboard):** collapses back to one compact row to keep the thread tall.
-- **Accessibility:** every icon button has an accessible name. The More menu uses `aria-haspopup` / `aria-expanded`, moves focus in on open, restores it on close, and closes on Escape, outside tap, Tab or resize. Controls are 44×44 px on coarse pointers. The full model and provider stay available in the model picker and the chip's accessible name.
+- **Accessibility:** every icon button has an accessible name. The More menu uses `aria-haspopup` / `aria-expanded`, moves focus in on open, restores it on close, and closes on Escape, outside tap, Tab, or resize. Controls are 44×44 px on coarse pointers. The full model and provider stay available in the model picker and the chip's accessible name.
 - **Composer:** on coarse pointers Enter inserts a newline and Ctrl+Enter or the send button sends; the placeholder does not advertise Enter-to-send.
 
 ## Unread and attention indicators (implemented)
@@ -44,7 +44,7 @@ Not implemented. The design keeps activity and unread as separate facts and neve
 - A stale snapshot (offline, or older than the freshness window) keeps its last state with an explicit stale cue.
 - A missing status field means unsupported, not idle.
 
-**Coverage.** The gateway can report activity only for runs it hosts: API-server runs (including Uplink's) and messaging-gateway turns. CLI, TUI and desktop-app runs are separate processes and report `unknown`; their completion still produces an unread badge.
+**Coverage.** The gateway can report activity only for runs it hosts: API-server runs (including Uplink's) and messaging-gateway turns. CLI, TUI, and desktop-app runs are separate processes and report `unknown`; their completion still produces an unread badge.
 
 **Proposed API.** Additive optional fields on session rows: `activity_state` (`idle | working | needs_input | stalled | unknown`) and `status_updated_at`, computed in one batched pass so the sidebar needs no per-row requests, and advertised through `/v1/capabilities`. `needs_input` comes from a pending clarify or an approval wait. Freshness would use the existing refresh on focus/visibility plus, at most, a low-frequency poll (15–30 s) paused while hidden, weighed against the battery and data budget.
 

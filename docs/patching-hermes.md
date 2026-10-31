@@ -37,7 +37,7 @@ return web.json_response(
 
 If the repo enforces a per-file line cap (upstream does for `api_server.py` and `hermes_state_sessions.py`), put the helpers in new sibling modules and call them from the handlers instead of editing those files in place.
 
-**Test:** create sessions that are never-tracked, marked unread, marked read, and active after being read; assert `list`, `get` and `patch` agree for each. The test must fail on the unpatched code with `KeyError: 'unread'`.
+**Test:** create sessions that are never-tracked, marked unread, marked read, and active after being read; assert `list`, `get`, and `patch` agree for each. The test must fail on the unpatched code with `KeyError: 'unread'`.
 
 **Check:** `curl -H "Authorization: Bearer $KEY" http://127.0.0.1:8642/api/sessions/<id>` shows `"unread": false`; restart the gateway first.
 

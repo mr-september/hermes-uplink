@@ -41,7 +41,7 @@ Instead of relying on bandwidth-heavy screen sharing or transferring project dat
 
 ## Design Principles
 
-- **Zero build steps:** The client is plain HTML, CSS and JS with one vendored dependency.
+- **Zero build steps:** The client is plain HTML, CSS, and JS with one vendored dependency.
 - **Native execution:** Driven by Hermes's first-party API Server running natively on Windows.
 - **Secure architecture:** A loopback-only standard-library proxy keeps the API key on the host desktop; remote access is provided through Tailscale Funnel.
 - **Standalone:** Uplink runs independently of the Hermes-agent UI packages.
@@ -49,7 +49,7 @@ Instead of relying on bandwidth-heavy screen sharing or transferring project dat
 
 ## Architecture
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for components, flows, the security model and operations.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for components, flows, the security model, and operations.
 
 ```mermaid
 flowchart LR
@@ -91,7 +91,7 @@ flowchart LR
 - **Tailscale for Windows** installed and signed in on the host desktop. Install it from the [official Windows download](https://tailscale.com/download/windows).
 - **No Python package installation is required.** The proxy and internet-access controller use the Python standard library.
 
-The phone or laptop used as the edge browser does not need Tailscale installed. Tailscale Funnel is available on all plans, but Tailscale's free Personal plan is intended for personal/non-commercial use. Review the [current Tailscale plan terms](https://tailscale.com/pricing) for your situation. Funnel requires no router port forwarding, public IP, or custom domain.
+The phone or laptop used as the edge browser does not need Tailscale installed. Tailscale Funnel is available on all plans, but Tailscale's free Personal plan is sufficient for personal/non-commercial use. Review the [current Tailscale plan terms](https://tailscale.com/pricing) for your situation. Funnel requires no router port forwarding, public IP, or custom domain.
 
 ## Setup & Configuration
 
