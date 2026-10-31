@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+import getpass
 import os
 import re
 import secrets
 import string
+import subprocess
 from pathlib import Path
 
 DEFAULT_UPSTREAM = "http://127.0.0.1:8642"
@@ -40,6 +42,19 @@ def read_credential(name: str, pattern: re.Pattern, root: Path = ROOT) -> str | 
     return value if pattern.fullmatch(value) else None
 
 
+def restrict_to_current_user(path: Path) -> None:
+    """Drop inherited ACL entries so only the current user can read or change the file (Windows)."""
+    if os.name != "nt":
+        path.chmod(0o600)
+        return
+    result = subprocess.run(
+        ["icacls", str(path), "/inheritance:r", "/grant:r", f"{getpass.getuser()}:F"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        raise SettingsError(f"Could not restrict permissions on {path.name}: {result.stdout.strip() or result.stderr.strip()}")
+
+
 def _write_credential(name: str, value: str, root: Path) -> None:
     with open(root / name, "w", encoding="ascii", newline="") as stream:
         stream.write(value)
@@ -49,7 +64,8 @@ def ensure_credentials(root: Path = ROOT) -> tuple[str, str, list[str]]:
     """Return (api_key, passphrase, notes), creating or repairing the credential files.
 
     An existing malformed API key is never replaced silently (it may be configured in
-    Hermes already); a missing or weak passphrase is regenerated.
+    Hermes already); a missing or weak passphrase is regenerated. Both files are
+    restricted to the current user on every call, which also repairs older installs.
     """
     notes: list[str] = []
     key = read_credential(KEY_FILE, KEY_PATTERN, root)
@@ -65,6 +81,8 @@ def ensure_credentials(root: Path = ROOT) -> tuple[str, str, list[str]]:
         passphrase = "".join(secrets.choice(alphabet) for _ in range(24))
         _write_credential(PASS_FILE, passphrase, root)
         notes.append("Generated passphrase.")
+    for name in (KEY_FILE, PASS_FILE):
+        restrict_to_current_user(root / name)
     return key, passphrase, notes
 
 
