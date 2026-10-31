@@ -4,10 +4,10 @@ Uplink is a zero-build browser client plus a loopback-only proxy for [Hermes Age
 
 Design constraints:
 
-- **No build step.** Plain HTML, CSS and JS with one vendored dependency (`marked`); Python standard library only.
+- **No build step.** Plain HTML, CSS, and JS with one vendored dependency (`marked`); Python standard library only.
 - **Loopback only.** The proxy binds 127.0.0.1; the API key never reaches the browser.
 - **Pinned assets.** Served files are authorized by SHA-256 digests; the proxy refuses to start if they drift.
-- **Shared sessions.** Sessions live in the Hermes store, so Uplink, CLI, TUI and cron see the same conversations.
+- **Shared sessions.** Sessions live in the Hermes store, so Uplink, CLI, TUI, and cron see the same conversations.
 - **Frugal connectivity.** No background polling: refresh on focus/visibility, last-render cache, draft autosave, SSE keepalive.
 
 ## Components
@@ -32,21 +32,21 @@ flowchart TB
 |---|---|
 | [proxy.py](proxy.py) | Reverse proxy, auth gate, static server, digest verification |
 | [internet_access.py](internet_access.py) | Tailscale Funnel lifecycle: status parsing, ownership guard, consent URL handling |
-| [uplink_setup.py](uplink_setup.py) | First-run setup: validates settings, creates credentials, configures and restarts the Hermes gateway |
-| [uplink_common.py](uplink_common.py) | Defaults, credential-file handling and the Windows console helper shared by the above |
+| [uplink_setup.py](uplink_setup.py) | First-run setup: validates settings, creates credentials, and configures and restarts the Hermes gateway |
+| [uplink_common.py](uplink_common.py) | Defaults, credential-file handling, and the Windows console helper shared by the above |
 | [web/](web/) | The client, served by the proxy: `index.html`, `app.js`, `app.css`, `sw.js`, `manifest.webmanifest`, `vendor/marked.umd.js`, `assets/` |
-| [web/pinned-hashes.json](web/pinned-hashes.json) | Pinned SHA-256 digests of every served page, script and stylesheet (written by `--update-hashes`) |
+| [web/pinned-hashes.json](web/pinned-hashes.json) | Pinned SHA-256 digests of every served page, script, and stylesheet (written by `--update-hashes`) |
 | [launch_local.bat](launch_local.bat) | Runs setup then the proxy in the foreground; `install` / `start` / `stop` / `status` manage login auto-start |
 | [launch_internet.bat](launch_internet.bat) | Wrapper for `internet_access.py` |
 | [windows/](windows/) | `autostart.vbs` (headless start at login) and `service.ps1` (PID-checked stop/status) |
 
-`sw.js` exists mainly to make the app installable: it caches only the manifest, itself and `marked`, never `index.html`, `app.js` or API calls.
+`sw.js` exists mainly to make the app installable: it caches only the manifest, itself, and `marked`, never `index.html`, `app.js` or API calls.
 
 The proxy takes the API key and passphrase from the `HERMES_API_KEY` / `UPLINK_PASSPHRASE` environment variables, falling back to the git-ignored `.uplink-key.txt` / `.uplink-pass.txt` that `uplink_setup.py` creates. Credential formats are validated in one place, `uplink_common.py`.
 
 ## Authentication and sessions
 
-`/api/*`, `/v1/*` and `/health` require a session cookie. The browser probes `/api/sessions`; a transport failure shows the offline banner, a `401` shows the passphrase modal.
+`/api/*`, `/v1/*`, and `/health` require a session cookie. The browser probes `/api/sessions`; a transport failure shows the offline banner, a `401` shows the passphrase modal.
 
 ```mermaid
 sequenceDiagram
@@ -92,7 +92,7 @@ Clarify (interactive questions) is specified in [docs/clarify-protocol.md](docs/
 | Host pivoting | Loopback bind only; non-loopback upstreams require `--allow-remote-upstream` and HTTPS |
 | Overwriting another Funnel/Serve config | `matching_uplink_route` refuses any other public route on 443; cleanup disables only a verified Uplink route |
 
-Because of the CSP, UI code must not use inline `<script>`, inline `style=""` attributes or `onclick=""`; use classes and `addEventListener`. CSSOM writes such as `style.setProperty` are allowed.
+Because of the CSP, UI code must not use inline `<script>`, inline `style=""` attributes, or `onclick=""`; use classes and `addEventListener`. CSSOM writes such as `style.setProperty` are allowed.
 
 ## Funnel lifecycle
 
