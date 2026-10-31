@@ -8,7 +8,7 @@ Instead of relying on bandwidth-heavy screen sharing or transferring project dat
 
 [![GitHub release](https://img.shields.io/github/release/mr-september/hermes-uplink.svg)](https://github.com/mr-september/hermes-uplink/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-yellow.svg)](app.js)
+[![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-yellow.svg)](web/app.js)
 
 ---
 
@@ -148,6 +148,7 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 - **Session Authentication:** The passphrase is accepted only by a POST authentication endpoint. The proxy issues a short-lived HttpOnly browser session cookie.
 - **Public Endpoint, Application Gate:** Tailscale Funnel makes the HTTPS endpoint publicly reachable; the Uplink passphrase remains the application-level authentication gate.
 - **Loopback Boundary:** The proxy listens only on localhost. The Funnel target is `http://127.0.0.1:8787`.
+- **Credential files:** `.uplink-key.txt` and `.uplink-pass.txt` are git-ignored and restricted to the current Windows user (inherited ACL entries are removed on every setup run).
 - **No Tunnel Secrets in Repository:** Tailscale manages its own machine credentials outside the checkout.
 - **Full Agent Privilege:** A connected session can read existing sessions and invoke full Hermes capabilities. Treat the passphrase as a full-access credential.
 

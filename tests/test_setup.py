@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,15 @@ class CredentialTests(unittest.TestCase):
             (root / uplink_common.KEY_FILE).write_text("bad key; calc", encoding="ascii")
             with self.assertRaises(uplink_common.SettingsError):
                 uplink_common.ensure_credentials(root)
+
+    @unittest.skipUnless(os.name == "nt", "NTFS ACLs")
+    def test_credential_files_are_not_readable_by_other_accounts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            uplink_common.ensure_credentials(root)
+            for name in (uplink_common.KEY_FILE, uplink_common.PASS_FILE):
+                acl = subprocess.run(["icacls", str(root / name)], capture_output=True, text=True).stdout
+                self.assertNotRegex(acl, r"(?i)BUILTIN\\Users|Authenticated Users|Everyone|\(I\)")
 
     def test_parse_port_rejects_non_ports(self):
         self.assertEqual(uplink_common.parse_port("8787"), 8787)
