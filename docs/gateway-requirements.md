@@ -18,7 +18,7 @@ Uplink talks to the Hermes API server (the gateway's REST + SSE surface). Core c
 
 On the NousResearch/hermes-agent `main` line as of the 2026-11-01 lock (upstream `9bba78ef`), sending to a **pre-existing session** can be refused before the turn starts: the stream-door admission in `gateway/session_api_turn.py` (`admit_api_steps`) refuses any target whose `sessions.source` is not `api_server` or `bot_room`, while gateways that stamp their local sessions with their own labels (`local`, `desktop`) never store `api_server` for sessions created outside `POST /api/sessions`. The client then sees an immediate SSE `error` frame carrying `permission_denied`, the message is never admitted, and the stream closes — every session created by the desktop app, CLI, or a messaging surface becomes read-only in Uplink. Sessions created via `POST /api/sessions` (source `api_server`) work normally, so brand-new Uplink chats still send. This is a total blocker for continuing existing sessions, not a degrade.
 
-Fix on the gateway side: widen the allowed source tuple in `admit_api_steps` — see [patching-hermes.md](patching-hermes.md) §3. Uplink itself needs no change; older gateway builds are not known to be affected.
+Fix on the gateway side: admit local surfaces at **both** foreign-source gates — the `admit_api_steps` tuple and the storage-source binding checks in `gateway/session_api.py` — see [patching-hermes.md](patching-hermes.md) §3. Uplink itself needs no change; older gateway builds are not known to be affected.
 
 ## Optional features
 
