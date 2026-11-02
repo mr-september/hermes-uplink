@@ -54,6 +54,20 @@ Port the later of the two clarify commits against your checkout's current clarif
 
 Without section 2, a clarify call from the agent has no card in Uplink and waits for its timeout; avoid prompts that depend on it.
 
+## 3. Admissions for pre-existing sessions (required since upstream `9bba78ef`)
+
+**Symptom:** every send to a session that already exists (created by the desktop app, CLI, or a messaging surface) fails instantly: the SSE stream opens, emits `run.started`, then a single `error` frame with `permission_denied`, then `done`. No user message is admitted. Sends in brand-new Uplink sessions work, which makes it look intermittent.
+
+**Cause:** `admit_api_steps()` in `gateway/session_api_turn.py` refuses a "foreign-surface" target before admitting, comparing `sessions.source` against a tuple that only allows `api_server` and `bot_room`. Gateways that stamp their own local sessions `local` or `desktop` therefore reject every continuation from the session-stream door (`POST /api/sessions/{id}/chat/stream`).
+
+**Verified against** NousResearch/hermes-agent `main` as of the 2026-11-01 update (symbols: `admit_api_steps`, `authority.db.get_session`; the check reads `existing['source'] not in ('api_server', 'bot_room')`).
+
+1. In `admit_api_steps()`, widen the tuple to include the source labels your gateway legitimately stamps on its own local sessions — on the reference checkout: `('api_server', 'bot_room', 'local', 'desktop')`. Keep genuinely remote surfaces (e.g. `telegram`, `discord`) refused, preserving the check's original purpose of not admitting into another adapter's session.
+
+**Test:** insert (or create, then re-stamp) a session whose `source` is `local`; POST to `/api/sessions/{id}/chat/stream` and assert the stream reaches `assistant.completed` instead of an `error` frame. The test must fail on the unpatched code with `permission_denied`.
+
+**Check:** restart the gateway, then in Uplink open any older session and send — the message admits and the agent answers.
+
 ## After patching
 
 Restart the gateway, reload Uplink, and open **Capabilities** (the ⓘ button) to see the raw `/v1/capabilities` response and confirm the flags you expect. Re-apply the patches after each Hermes update, since an upstream change to the touched functions can drop them silently; your agent's tests are the tripwire.
