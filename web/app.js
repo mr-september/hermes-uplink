@@ -1967,7 +1967,19 @@ function handleFrame(frame, bubble){
     }
   }else if(event==="error"){
     addBubbleNote(bubble, "[error] " + ((obj && obj.message) || data || "stream error"));
+    // A stream that produced nothing before failing (e.g. a gateway refusal at admission) left no
+    // server-side copy of the user's text, and the draft was cleared when the stream opened. Put it
+    // back: the draft reconciler drops it automatically if the message was in fact committed.
+    if(S && bubble && !bubble._gotText && !bubble._gotTools){
+      const utext = S.userBubble && S.userBubble.dataset ? S.userBubble.dataset.text : "";
+      if(utext){
+        saveDraft(S.sid, utext, "");
+        const inputEl = $("input");
+        if(fg && inputEl && !inputEl.value){ inputEl.value = utext; updateRingState(); }
+      }
+    }
   }else if(event==="tool.started"){
+    if(bubble) bubble._gotTools = true;
     if(bubble && bubble._curBody && bubble._curRaw){
       flushRender(bubble);
     }
