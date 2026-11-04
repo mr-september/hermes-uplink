@@ -7,44 +7,43 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import uplink_common  # noqa: E402
-import uplink_setup  # noqa: E402
+from uplink import configure, settings  # noqa: E402
 
 
 class CredentialTests(unittest.TestCase):
     def test_ensure_credentials_generates_valid_files_and_is_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            key, passphrase, notes = uplink_common.ensure_credentials(root)
-            self.assertRegex(key, uplink_common.KEY_PATTERN.pattern)
-            self.assertRegex(passphrase, uplink_common.PASS_PATTERN.pattern)
+            key, passphrase, notes = settings.ensure_credentials(root)
+            self.assertRegex(key, settings.KEY_PATTERN.pattern)
+            self.assertRegex(passphrase, settings.PASS_PATTERN.pattern)
             self.assertEqual(len(notes), 2)
-            self.assertEqual(uplink_common.ensure_credentials(root), (key, passphrase, []))
+            self.assertEqual(settings.ensure_credentials(root), (key, passphrase, []))
 
     def test_weak_passphrase_is_regenerated_but_malformed_key_is_refused(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / uplink_common.PASS_FILE).write_text("short", encoding="ascii")
-            _, passphrase, _ = uplink_common.ensure_credentials(root)
+            (root / settings.PASS_FILE).write_text("short", encoding="ascii")
+            _, passphrase, _ = settings.ensure_credentials(root)
             self.assertNotEqual(passphrase, "short")
-            (root / uplink_common.KEY_FILE).write_text("bad key; calc", encoding="ascii")
-            with self.assertRaises(uplink_common.SettingsError):
-                uplink_common.ensure_credentials(root)
+            (root / settings.KEY_FILE).write_text("bad key; calc", encoding="ascii")
+            with self.assertRaises(settings.SettingsError):
+                settings.ensure_credentials(root)
 
     @unittest.skipUnless(os.name == "nt", "NTFS ACLs")
     def test_credential_files_are_not_readable_by_other_accounts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            uplink_common.ensure_credentials(root)
-            for name in (uplink_common.KEY_FILE, uplink_common.PASS_FILE):
+            settings.ensure_credentials(root)
+            for name in (settings.KEY_FILE, settings.PASS_FILE):
                 acl = subprocess.run(["icacls", str(root / name)], capture_output=True, text=True).stdout
                 self.assertNotRegex(acl, r"(?i)BUILTIN\\Users|Authenticated Users|Everyone|\(I\)")
 
     def test_parse_port_rejects_non_ports(self):
-        self.assertEqual(uplink_common.parse_port("8787"), 8787)
+        self.assertEqual(settings.parse_port("8787"), 8787)
         for bad in ("", "0", "65536", "80a", "-1"):
-            with self.assertRaises(uplink_common.SettingsError):
-                uplink_common.parse_port(bad)
+            with self.assertRaises(settings.SettingsError):
+                settings.parse_port(bad)
 
 
 class ConfigureHermesTests(unittest.TestCase):
@@ -57,9 +56,9 @@ class ConfigureHermesTests(unittest.TestCase):
             calls.append(args)
             return subprocess.CompletedProcess([hermes, *args], 0, stdout="", stderr="")
 
-        with mock.patch.object(uplink_setup, "_hermes", fake), \
-                mock.patch.object(uplink_setup, "_hermes_config_text", return_value=config_text):
-            uplink_setup.configure_hermes("hermes", self.KEY)
+        with mock.patch.object(configure, "_hermes", fake), \
+                mock.patch.object(configure, "_hermes_config_text", return_value=config_text):
+            configure.configure_hermes("hermes", self.KEY)
         return calls
 
     def test_fresh_config_is_enabled_keyed_and_gateway_restarted_with_arg_lists(self):

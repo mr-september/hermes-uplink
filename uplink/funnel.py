@@ -1,8 +1,10 @@
 """Configure public browser access to Hermes Uplink through Tailscale Funnel.
 
-This module intentionally owns the entire internet-access boundary.  Tailscale
-is an externally installed system service; no credentials or provider state
-are stored in this repository.
+    python -m uplink.funnel [start|status|cleanup] [--port N] [--yes]    (no command: interactive menu)
+
+This module owns the entire internet-access boundary. Tailscale is an externally installed system service; no
+credentials or provider state are stored in this repository, and the only route it ever changes is the one it
+can prove belongs to Uplink.
 """
 
 from __future__ import annotations
@@ -12,20 +14,18 @@ import dataclasses
 import http.client
 import json
 import os
-from pathlib import Path
 import queue
 import re
 import shutil
 import subprocess
-import sys
 import threading
 import time
+import webbrowser
+from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 from urllib.parse import urlsplit
-import webbrowser
 
-from uplink_common import (
-    DEFAULT_PORT,
+from .settings import (
     DEFAULT_UPSTREAM,
     HEALTH_PROBE_HEADER,
     HEALTH_PROBE_VALUE,
@@ -36,6 +36,7 @@ from uplink_common import (
     ROOT,
     SettingsError,
     enable_console_selection,
+    env_port,
     parse_port,
     read_credential,
 )
@@ -224,7 +225,7 @@ def _parse_json(stdout: str, context: str) -> dict[str, Any]:
 
 
 def _backend_state(payload: Mapping[str, Any]) -> str:
-    return str(payload.get("BackendState", payload.get("backendState", "unknown")))
+    return str(payload.get("BackendState", "unknown"))
 
 
 def _normalise_host(hostname: str) -> str:
@@ -255,35 +256,23 @@ def _split_host_port(value: str) -> tuple[str, int] | None:
 
 
 def _iter_web_sections(payload: Mapping[str, Any]) -> Iterable[Mapping[str, Any]]:
-    """Support the current status shape and the nested service shape."""
+    """The serve config's own ``Web`` map and those of any named ``Services``.
 
-    for key in ("Web", "web"):
-        value = payload.get(key)
-        if isinstance(value, dict):
-            yield value
-
-    for key in ("Services", "services"):
-        services = payload.get(key)
-        if not isinstance(services, dict):
-            continue
+    Tailscale serializes its Go ServeConfig with the field names as keys (``Web``, ``Handlers``, ``Proxy``,
+    ``AllowFunnel``, ``Services``)."""
+    if isinstance(payload.get("Web"), dict):
+        yield payload["Web"]
+    services = payload.get("Services")
+    if isinstance(services, dict):
         for service in services.values():
             if isinstance(service, dict):
                 yield from _iter_web_sections(service)
 
 
-def _normalise_target(target: str) -> str:
-    return target.rstrip("/")
-
-
 def parse_funnel_status(payload: Mapping[str, Any]) -> list[FunnelRoute]:
     """Parse `tailscale funnel status --json` without trusting display text."""
-
-    allow_maps: list[Mapping[str, Any]] = []
-    for key in ("AllowFunnel", "allowFunnel"):
-        value = payload.get(key)
-        if isinstance(value, dict):
-            allow_maps.append(value)
-
+    allow = payload.get("AllowFunnel")
+    allow = allow if isinstance(allow, dict) else {}
     routes: list[FunnelRoute] = []
     seen: set[tuple[str, int, str, str]] = set()
     for web in _iter_web_sections(payload):
@@ -292,14 +281,14 @@ def parse_funnel_status(payload: Mapping[str, Any]) -> list[FunnelRoute]:
             if split is None or not isinstance(server, dict):
                 continue
             hostname, public_port = split
-            handlers = server.get("Handlers", server.get("handlers"))
+            handlers = server.get("Handlers")
             if not isinstance(handlers, dict):
                 continue
-            allowed = any(bool(mapping.get(host_port)) or bool(mapping.get(f"{hostname}:{public_port}")) for mapping in allow_maps)
+            allowed = bool(allow.get(host_port) or allow.get(f"{hostname}:{public_port}"))
             for path, handler in handlers.items():
                 if not isinstance(path, str) or not isinstance(handler, dict):
                     continue
-                target = handler.get("Proxy", handler.get("proxy"))
+                target = handler.get("Proxy")
                 if not isinstance(target, str):
                     continue
                 route_key = (hostname, public_port, path, target)
@@ -713,13 +702,13 @@ def _menu(port: int) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     enable_console_selection()
-    parser = argparse.ArgumentParser(description="Expose Hermes Uplink through Tailscale Funnel.")
+    parser = argparse.ArgumentParser(prog="python -m uplink.funnel", description="Expose Hermes Uplink through Tailscale Funnel.")
     parser.add_argument("command", nargs="?", choices=("start", "status", "cleanup"))
-    parser.add_argument("--port", type=int, default=None)
+    parser.add_argument("--port", type=int, default=None, help="default: HERMES_PORT or 8787")
     parser.add_argument("--yes", action="store_true", help="Do not prompt for cleanup confirmation.")
     args = parser.parse_args(argv)
     try:
-        port = parse_port(str(args.port) if args.port is not None else os.environ.get("HERMES_PORT", str(DEFAULT_PORT)))
+        port = parse_port(str(args.port)) if args.port is not None else env_port()
         if args.command == "start":
             return start_access(port)
         if args.command == "status":

@@ -10,7 +10,7 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import internet_access
+from uplink import funnel  # noqa: E402
 
 
 def funnel_payload(target="http://127.0.0.1:8787", hostname="uplink.tailnet.ts.net", allow=True):
@@ -35,7 +35,7 @@ class FakeRunner:
         key = tuple(args[1:])
         response = self.responses.get(key)
         if response is None:
-            return internet_access.CommandResult(0, "{}", "")
+            return funnel.CommandResult(0, "{}", "")
         if callable(response):
             return response(args, timeout)
         return response
@@ -44,7 +44,7 @@ class FakeRunner:
 class InternetAccessTests(unittest.TestCase):
     def test_find_tailscale_executable_from_path(self):
         self.assertEqual(
-            internet_access.find_tailscale_executable(which=lambda name: "C:/Tailscale/tailscale.exe"),
+            funnel.find_tailscale_executable(which=lambda name: "C:/Tailscale/tailscale.exe"),
             "C:/Tailscale/tailscale.exe",
         )
 
@@ -53,17 +53,17 @@ class InternetAccessTests(unittest.TestCase):
             path = Path(directory) / "Tailscale" / "tailscale.exe"
             path.parent.mkdir()
             path.write_bytes(b"test")
-            found = internet_access.find_tailscale_executable(
+            found = funnel.find_tailscale_executable(
                 environ={"ProgramFiles": directory},
                 which=lambda _name: None,
             )
             self.assertEqual(found, str(path))
 
     def test_missing_tailscale_executable_is_reported(self):
-        self.assertIsNone(internet_access.find_tailscale_executable(which=lambda _name: None, environ={}))
+        self.assertIsNone(funnel.find_tailscale_executable(which=lambda _name: None, environ={}))
 
     def test_parse_valid_funnel_status(self):
-        routes = internet_access.parse_funnel_status(funnel_payload())
+        routes = funnel.parse_funnel_status(funnel_payload())
         self.assertEqual(len(routes), 1)
         self.assertEqual(routes[0].hostname, "uplink.tailnet.ts.net")
         self.assertEqual(routes[0].public_port, 443)
@@ -76,18 +76,18 @@ class InternetAccessTests(unittest.TestCase):
                 "svc:uplink": funnel_payload(),
             }
         }
-        routes = internet_access.parse_funnel_status(payload)
+        routes = funnel.parse_funnel_status(payload)
         self.assertEqual(len(routes), 1)
         self.assertEqual(routes[0].target, "http://127.0.0.1:8787")
 
     def test_malformed_status_json_is_rejected(self):
-        with self.assertRaises(internet_access.InternetAccessError):
-            internet_access._parse_json("not-json", "Funnel status")
+        with self.assertRaises(funnel.InternetAccessError):
+            funnel._parse_json("not-json", "Funnel status")
 
     def test_tailscale_consent_url_is_extracted(self):
         output = "Please approve Funnel: https://login.tailscale.com/f/funnel?node=abc123."
         self.assertEqual(
-            internet_access.extract_tailscale_consent_url(output),
+            funnel.extract_tailscale_consent_url(output),
             "https://login.tailscale.com/f/funnel?node=abc123",
         )
 
@@ -97,8 +97,8 @@ class InternetAccessTests(unittest.TestCase):
             "-c",
             "print('approve https://login.tailscale.com/f/funnel?node=test123.')",
         ]
-        with patch("internet_access.webbrowser.open", return_value=True) as opener:
-            result = internet_access._default_interactive_runner(command, timeout=3)
+        with patch("uplink.funnel.webbrowser.open", return_value=True) as opener:
+            result = funnel._default_interactive_runner(command, timeout=3)
         self.assertEqual(result.returncode, 0)
         opener.assert_called_once_with(
             "https://login.tailscale.com/f/funnel?node=test123",
@@ -108,20 +108,20 @@ class InternetAccessTests(unittest.TestCase):
 
     def test_invalid_public_hostname_is_not_accepted(self):
         payload = funnel_payload(hostname="attacker.example.com")
-        self.assertEqual(internet_access.parse_funnel_status(payload), [])
+        self.assertEqual(funnel.parse_funnel_status(payload), [])
 
     def test_matching_route_requires_expected_target_and_public_permission(self):
-        routes = internet_access.parse_funnel_status(funnel_payload())
-        route = internet_access.matching_uplink_route(routes, 8787)
+        routes = funnel.parse_funnel_status(funnel_payload())
+        route = funnel.matching_uplink_route(routes, 8787)
         self.assertIsNotNone(route)
 
-        wrong_target = internet_access.parse_funnel_status(funnel_payload("http://127.0.0.1:9999"))
-        with self.assertRaises(internet_access.InternetAccessError):
-            internet_access.matching_uplink_route(wrong_target, 8787)
+        wrong_target = funnel.parse_funnel_status(funnel_payload("http://127.0.0.1:9999"))
+        with self.assertRaises(funnel.InternetAccessError):
+            funnel.matching_uplink_route(wrong_target, 8787)
 
-        private_route = internet_access.parse_funnel_status(funnel_payload(allow=False))
-        with self.assertRaises(internet_access.InternetAccessError):
-            internet_access.matching_uplink_route(private_route, 8787)
+        private_route = funnel.parse_funnel_status(funnel_payload(allow=False))
+        with self.assertRaises(funnel.InternetAccessError):
+            funnel.matching_uplink_route(private_route, 8787)
 
     def test_multiple_public_routes_are_always_a_conflict(self):
         payload = funnel_payload()
@@ -129,43 +129,43 @@ class InternetAccessTests(unittest.TestCase):
             "Handlers": {"/": {"Proxy": "http://127.0.0.1:9999"}}
         }
         payload["AllowFunnel"]["other.tailnet.ts.net:443"] = True
-        routes = internet_access.parse_funnel_status(payload)
-        with self.assertRaises(internet_access.InternetAccessError):
-            internet_access.matching_uplink_route(routes, 8787)
+        routes = funnel.parse_funnel_status(payload)
+        with self.assertRaises(funnel.InternetAccessError):
+            funnel.matching_uplink_route(routes, 8787)
 
     def test_existing_matching_route_is_idempotent(self):
         runner = FakeRunner(
             {
-                ("funnel", "status", "--json"): internet_access.CommandResult(
+                ("funnel", "status", "--json"): funnel.CommandResult(
                     0, json.dumps(funnel_payload()), ""
                 )
             }
         )
-        client = internet_access.TailscaleClient("tailscale.exe", runner=runner)
-        route = internet_access.ensure_funnel_route(client, 8787)
+        client = funnel.TailscaleClient("tailscale.exe", runner=runner)
+        route = funnel.ensure_funnel_route(client, 8787)
         self.assertEqual(route.hostname, "uplink.tailnet.ts.net")
         self.assertEqual(len(runner.calls), 1)
 
     def test_cleanup_requires_owned_route(self):
-        matching = internet_access.parse_funnel_status(funnel_payload())
+        matching = funnel.parse_funnel_status(funnel_payload())
         self.assertEqual(
-            internet_access.require_owned_route(matching, 8787).hostname,
+            funnel.require_owned_route(matching, 8787).hostname,
             "uplink.tailnet.ts.net",
         )
 
-        unrelated = internet_access.parse_funnel_status(
+        unrelated = funnel.parse_funnel_status(
             funnel_payload("http://127.0.0.1:9999")
         )
-        with self.assertRaises(internet_access.InternetAccessError):
-            internet_access.require_owned_route(unrelated, 8787)
+        with self.assertRaises(funnel.InternetAccessError):
+            funnel.require_owned_route(unrelated, 8787)
 
-        with self.assertRaises(internet_access.InternetAccessError):
-            internet_access.require_owned_route([], 8787)
+        with self.assertRaises(funnel.InternetAccessError):
+            funnel.require_owned_route([], 8787)
 
     def test_command_construction_uses_argument_arrays(self):
         runner = FakeRunner()
         interactive = FakeRunner()
-        client = internet_access.TailscaleClient(
+        client = funnel.TailscaleClient(
             "tailscale.exe",
             runner=runner,
             interactive_runner=interactive,
@@ -183,42 +183,42 @@ class InternetAccessTests(unittest.TestCase):
     def test_status_command_requires_valid_json(self):
         runner = FakeRunner(
             {
-                ("status", "--json"): internet_access.CommandResult(0, "[]", ""),
+                ("status", "--json"): funnel.CommandResult(0, "[]", ""),
             }
         )
-        client = internet_access.TailscaleClient("tailscale.exe", runner=runner)
-        with self.assertRaises(internet_access.InternetAccessError):
+        client = funnel.TailscaleClient("tailscale.exe", runner=runner)
+        with self.assertRaises(funnel.InternetAccessError):
             client.status()
 
     def test_authentication_requires_running_backend_state(self):
         needs_login = FakeRunner(
             {
-                ("status", "--json"): internet_access.CommandResult(
+                ("status", "--json"): funnel.CommandResult(
                     0, json.dumps({"BackendState": "NeedsLogin"}), ""
                 ),
             }
         )
-        client = internet_access.TailscaleClient("tailscale.exe", runner=needs_login)
+        client = funnel.TailscaleClient("tailscale.exe", runner=needs_login)
         self.assertFalse(client.is_authenticated())
 
         running = FakeRunner(
             {
-                ("status", "--json"): internet_access.CommandResult(
+                ("status", "--json"): funnel.CommandResult(
                     0, json.dumps({"BackendState": "Running"}), ""
                 ),
             }
         )
-        client = internet_access.TailscaleClient("tailscale.exe", runner=running)
+        client = funnel.TailscaleClient("tailscale.exe", runner=running)
         self.assertTrue(client.is_authenticated())
 
     def test_nonzero_tailscale_command_is_reported(self):
         runner = FakeRunner(
             {
-                ("status", "--json"): internet_access.CommandResult(1, "", "login required"),
+                ("status", "--json"): funnel.CommandResult(1, "", "login required"),
             }
         )
-        client = internet_access.TailscaleClient("tailscale.exe", runner=runner)
-        with self.assertRaises(internet_access.TailscaleCommandError) as context:
+        client = funnel.TailscaleClient("tailscale.exe", runner=runner)
+        with self.assertRaises(funnel.TailscaleCommandError) as context:
             client.status()
         self.assertIn("login required", str(context.exception))
 
@@ -233,7 +233,7 @@ class InternetAccessTests(unittest.TestCase):
         def sleeper(seconds):
             clock[0] += seconds
 
-        internet_access.ensure_local_proxy(
+        funnel.ensure_local_proxy(
             8787,
             root=Path(__file__).resolve().parents[1],
             health_check=health,
@@ -241,22 +241,22 @@ class InternetAccessTests(unittest.TestCase):
             sleeper=sleeper,
             monotonic=lambda: clock[0],
         )
-        self.assertEqual(started, [Path(__file__).resolve().parents[1] / internet_access.LOCAL_LAUNCHER])
+        self.assertEqual(started, [Path(__file__).resolve().parents[1] / funnel.LOCAL_LAUNCHER])
 
     @unittest.skipIf(os.name == "nt", "Linux launcher")
     def test_linux_proxy_start_runs_launcher_and_reports_its_failure(self):
         launcher = Path(__file__).resolve().parents[1] / "launch_local.sh"
         failed = subprocess.CompletedProcess(["bash"], 3)
-        with patch("internet_access.subprocess.run", return_value=failed) as run:
-            with self.assertRaises(internet_access.InternetAccessError) as context:
-                internet_access.start_local_proxy(launcher)
+        with patch("uplink.funnel.subprocess.run", return_value=failed) as run:
+            with self.assertRaises(funnel.InternetAccessError) as context:
+                funnel.start_local_proxy(launcher)
         self.assertEqual(run.call_args.args[0], ["bash", str(launcher), "start"])
         self.assertIn("exit 3", str(context.exception))
 
     @unittest.skipIf(os.name == "nt", "Linux tailscaled operator")
     def test_linux_access_denied_names_the_operator_fix(self):
-        result = internet_access.CommandResult(1, "", "Access denied: serve config denied")
-        error = internet_access.TailscaleCommandError(["funnel", "--bg"], result)
+        result = funnel.CommandResult(1, "", "Access denied: serve config denied")
+        error = funnel.TailscaleCommandError(["funnel", "--bg"], result)
         self.assertIn("sudo tailscale set --operator=$USER", str(error))
 
     def test_local_proxy_start_wait_fails_with_timeout(self):
@@ -265,8 +265,8 @@ class InternetAccessTests(unittest.TestCase):
         def sleeper(seconds):
             clock[0] += seconds
 
-        with self.assertRaises(internet_access.InternetAccessError):
-            internet_access.ensure_local_proxy(
+        with self.assertRaises(funnel.InternetAccessError):
+            funnel.ensure_local_proxy(
                 8787,
                 root=Path(__file__).resolve().parents[1],
                 health_check=lambda _port: False,
@@ -278,8 +278,8 @@ class InternetAccessTests(unittest.TestCase):
     def test_interactive_menu_keeps_running_until_explicit_exit(self):
         choices = iter(["2", "", "4"])
         with patch("builtins.input", side_effect=lambda _prompt: next(choices)):
-            with patch.object(internet_access, "show_status", return_value=0) as status:
-                self.assertEqual(internet_access._menu(8787), 0)
+            with patch.object(funnel, "show_status", return_value=0) as status:
+                self.assertEqual(funnel._menu(8787), 0)
         status.assert_called_once_with(8787)
 
     def test_is_upstream_healthy_active_and_inactive(self):
@@ -302,8 +302,8 @@ class InternetAccessTests(unittest.TestCase):
         thread.start()
         try:
             active_url = f"http://127.0.0.1:{server.server_port}"
-            self.assertTrue(internet_access.is_upstream_healthy(active_url))
-            self.assertFalse(internet_access.is_upstream_healthy("http://127.0.0.1:1"))
+            self.assertTrue(funnel.is_upstream_healthy(active_url))
+            self.assertFalse(funnel.is_upstream_healthy("http://127.0.0.1:1"))
         finally:
             server.shutdown()
             server.server_close()

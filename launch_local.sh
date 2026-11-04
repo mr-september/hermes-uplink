@@ -16,7 +16,7 @@
 #    HERMES_CLI       hermes launcher   (default: hermes on PATH)
 #
 #  Setup (credentials, Hermes configuration, gateway restart) lives in
-#  uplink_setup.py. "start" and "install" write a systemd user unit that
+#  uplink/configure.py. "start" and "install" write a systemd user unit that
 #  records this shell's PATH and the settings above, because the user
 #  service manager does not inherit the login shell's environment.
 #  Logs: journalctl --user -u hermes-uplink
@@ -52,7 +52,7 @@ require_systemd() {
 
 # Full setup only when the credentials are missing or invalid; it restarts the Hermes gateway.
 ensure_setup() {
-  "$PYTHON" uplink_setup.py --check >/dev/null 2>&1 || "$PYTHON" uplink_setup.py
+  "$PYTHON" -m uplink.configure --check >/dev/null 2>&1 || "$PYTHON" -m uplink.configure
 }
 
 write_unit() {
@@ -71,8 +71,8 @@ write_unit() {
     echo "Environment=$(quote_env "HERMES_PORT=$HERMES_PORT")"
     if [ -n "${HERMES_UPSTREAM:-}" ]; then echo "Environment=$(quote_env "HERMES_UPSTREAM=$HERMES_UPSTREAM")"; fi
     if [ -n "${HERMES_CLI:-}" ]; then echo "Environment=$(quote_env "HERMES_CLI=$HERMES_CLI")"; fi
-    echo "ExecStartPre=$(quote_cmd "$PYTHON") $(quote_cmd "$ROOT/uplink_setup.py") --check"
-    echo "ExecStart=$(quote_cmd "$PYTHON") $(quote_cmd "$ROOT/proxy.py")"
+    echo "ExecStartPre=$(quote_cmd "$PYTHON") -m uplink.configure --check"
+    echo "ExecStart=$(quote_cmd "$PYTHON") -m uplink.server"
     echo "Restart=on-failure"
     echo "RestartSec=5"
     echo
@@ -86,8 +86,8 @@ is_active() { systemctl --user is-active --quiet "$UNIT"; }
 
 case "${1:-}" in
   "")
-    "$PYTHON" uplink_setup.py
-    exec "$PYTHON" proxy.py --port "$HERMES_PORT"
+    "$PYTHON" -m uplink.configure
+    exec "$PYTHON" -m uplink.server --port "$HERMES_PORT"
     ;;
   install)
     require_systemd

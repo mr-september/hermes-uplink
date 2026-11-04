@@ -1,7 +1,7 @@
 @echo off
 REM =====================================================================
 REM  hermes-uplink - Tailscale Funnel internet-access launcher
-REM  The provider workflow lives in internet_access.py so it is testable.
+REM  The provider workflow lives in uplink\funnel.py so it is testable.
 REM =====================================================================
 setlocal
 cd /d "%~dp0"
@@ -16,7 +16,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-python "%~dp0internet_access.py" %*
+python -m uplink.funnel %*
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" pause
 if not "%~1"=="" if "%EXIT_CODE%"=="0" (

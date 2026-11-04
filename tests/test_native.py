@@ -10,8 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import hermes_native  # noqa: E402
-import proxy  # noqa: E402
+from uplink import native, server  # noqa: E402
 
 # What `hermes chat --format stream-json` printed for a real turn (fields as observed on 2026-11-04).
 CLI_EVENTS = [
@@ -35,7 +34,7 @@ def frames(body):
 
 class TranslatorTests(unittest.TestCase):
     def test_cli_events_become_the_session_stream_frames_the_client_reads(self):
-        translator = hermes_native.Translator("s", "uplink-native-x")
+        translator = native.Translator("s", "uplink-native-x")
         produced = translator.started()
         for event in CLI_EVENTS:
             produced += translator.translate(event)
@@ -49,24 +48,24 @@ class TranslatorTests(unittest.TestCase):
         self.assertTrue(all(payload["run_id"] == "uplink-native-x" for _, payload in produced))
 
     def test_failed_or_interrupted_turn_ends_with_an_error_frame(self):
-        translator = hermes_native.Translator("s", "r")
+        translator = native.Translator("s", "r")
         produced = translator.translate({"type": "result", "exit_code": 3, "text": "",
                                          "error": "This chat is paused behind a turn"})
         self.assertEqual([name for name, _ in produced], ["error", "done"])
         self.assertIn("paused", produced[0][1]["message"])
-        produced = hermes_native.Translator("s", "r").translate({"type": "result", "exit_code": 130, "text": ""})
+        produced = native.Translator("s", "r").translate({"type": "result", "exit_code": 130, "text": ""})
         self.assertEqual(produced[0], ("error", {"message": "interrupted", "session_id": "s", "run_id": "r"}))
 
     def test_helper_command_replaces_only_the_cli_entry(self):
-        runtime = hermes_native.Runtime("hermes")
-        boot = "import os, sys, runpy; sys.path.insert(0, 'C:\\\\h'); " + hermes_native._MAIN_TAIL
+        runtime = native.Runtime("hermes")
+        boot = "import os, sys, runpy; sys.path.insert(0, 'C:\\\\h'); " + native._MAIN_TAIL
         runtime._base = ["python.exe", "-I", "-c", boot]
-        command = runtime.helper_command("E:\\u\\hermes_interrupt.py", "sid")
+        command = runtime.helper_command("E:\\u\\interrupt_helper.py", "sid")
         self.assertEqual(command[:3], ["python.exe", "-I", "-c"])
-        self.assertTrue(command[3].endswith("runpy.run_path('E:\\\\u\\\\hermes_interrupt.py', run_name='__main__')"))
+        self.assertTrue(command[3].endswith("runpy.run_path('E:\\\\u\\\\interrupt_helper.py', run_name='__main__')"))
         self.assertEqual(command[4], "sid")
         runtime._base = ["python.exe", "-I", "-c", "runpy.run_module('other')"]
-        with self.assertRaises(hermes_native.NativeUnavailable):
+        with self.assertRaises(native.NativeUnavailable):
             runtime.helper_command("x.py")
 
 
@@ -107,16 +106,14 @@ def fake_cli(session_id):
 
 class NativeRoutingTests(unittest.TestCase):
     def setUp(self):
-        self.original = proxy.UPSTREAM, proxy.API_KEY, proxy.PASS
         self.upstream = ThreadingHTTPServer(("127.0.0.1", 0), Upstream)
         threading.Thread(target=self.upstream.serve_forever, daemon=True).start()
-        proxy.UPSTREAM = f"http://127.0.0.1:{self.upstream.server_port}"
-        proxy.API_KEY, proxy.PASS = "test-api-key", "test-passphrase"
-        self.server = proxy.UplinkServer(("127.0.0.1", 0), proxy.Handler)
+        config = server.Config(f"http://127.0.0.1:{self.upstream.server_port}", "test-api-key", "test-passphrase")
+        self.server = server.UplinkServer(("127.0.0.1", 0), config)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         Upstream.posted = []
-        patches = [mock.patch.object(hermes_native.RUNTIME, "available", return_value=True),
-                   mock.patch.object(hermes_native, "spawn_turn", side_effect=fake_cli)]
+        patches = [mock.patch.object(native.RUNTIME, "available", return_value=True),
+                   mock.patch.object(native, "spawn_turn", side_effect=fake_cli)]
         for patch in patches:
             patch.start()
             self.addCleanup(patch.stop)
@@ -126,9 +123,6 @@ class NativeRoutingTests(unittest.TestCase):
         self.server.server_close()
         self.upstream.shutdown()
         self.upstream.server_close()
-        proxy.UPSTREAM, proxy.API_KEY, proxy.PASS = self.original
-        with proxy.SESSION_LOCK:
-            proxy.SESSIONS.clear()
 
     def request(self, method, path, body=None, headers=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=10)
@@ -140,14 +134,14 @@ class NativeRoutingTests(unittest.TestCase):
 
     def cookie(self):
         connection = http.client.HTTPConnection("127.0.0.1", self.server.server_port, timeout=10)
-        connection.request("POST", "/__auth", body=json.dumps({"passphrase": proxy.PASS}),
+        connection.request("POST", "/__auth", body=json.dumps({"passphrase": "test-passphrase"}),
                            headers={"Content-Type": "application/json"})
         response = connection.getresponse()
         response.read()
         connection.close()
         cookie = SimpleCookie()
         cookie.load(response.getheader("Set-Cookie"))
-        return cookie[proxy.SESSION_COOKIE].OutputString()
+        return cookie[server.SESSION_COOKIE].OutputString()
 
     def send(self, session_id, cookie):
         return self.request("POST", f"/api/sessions/{session_id}/chat/stream",
@@ -170,8 +164,8 @@ class NativeRoutingTests(unittest.TestCase):
 
     def test_stop_of_a_native_run_interrupts_its_session(self):
         cookie = self.cookie()
-        run_id = hermes_native.RUNS.start("desk1")
-        with mock.patch.object(hermes_native, "interrupt", return_value=(True, "interrupted")) as interrupt:
+        run_id = native.RUNS.start("desk1")
+        with mock.patch.object(native, "interrupt", return_value=(True, "interrupted")) as interrupt:
             status, body = self.request("POST", f"/v1/runs/{run_id}/stop", body=b"", headers={"Cookie": cookie})
         self.assertEqual(status, 200)
         interrupt.assert_called_once_with("desk1")

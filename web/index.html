@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
@@ -15,7 +15,7 @@
 </head>
 <body>
   <div class="hidden" id="offlineBanner">
-    <span id="offlineBannerText">&#9888; Offline — Reconnecting to Uplink…</span>
+    <span id="offlineBannerText">&#9888; Offline â€” Reconnecting to Uplinkâ€¦</span>
     <button type="button" id="offlineRetryBtn">Retry Now</button>
   </div>
   <div id="sidebar">
@@ -28,7 +28,7 @@
       </button>
       <button class="toolbtn" id="settingsBtn" title="Settings" aria-label="Settings">&#9881;</button>
     </div>
-    <div id="search"><input id="searchInput" placeholder="Search sessions…" /></div>
+    <div id="search"><input id="searchInput" placeholder="Search sessionsâ€¦" /></div>
     <div class="bar new-chat-bar">
       <button class="primary new-chat-button" id="newBtn">+ New chat</button>
     </div>
@@ -41,11 +41,11 @@
       <div class="bar-row bar-primary">
         <button class="toolbtn" id="menuBtn" title="Sessions" aria-label="Sessions">&#9776;</button>
         <button class="toolbtn" id="infoBtn" title="Capabilities" aria-label="Capabilities">&#9432;</button>
-        <div class="active-title" id="activeTitle">No session — start or pick one</div>
+        <div class="active-title" id="activeTitle">No session â€” start or pick one</div>
       </div>
       <div class="bar-row bar-secondary">
-        <button class="modelchip" id="modelChip" type="button" title="Active Model — click to switch" aria-label="Model: choose model">
-          <span class="modelchip-icon" aria-hidden="true">⚡</span><span class="modelchip-body"><span class="modelchip-text" id="modelChipText">Model</span><span class="modelchip-prov" id="modelChipProv"></span></span>
+        <button class="modelchip" id="modelChip" type="button" title="Active Model â€” click to switch" aria-label="Model: choose model">
+          <span class="modelchip-icon" aria-hidden="true">âš¡</span><span class="modelchip-body"><span class="modelchip-text" id="modelChipText">Model</span><span class="modelchip-prov" id="modelChipProv"></span></span>
         </button>
         <button class="idchip hidden" id="idChip" type="button" title="Copy session ID" aria-label="Copy session ID">
           <span class="idchip-glyph" aria-hidden="true">&#128203;</span><span class="idchip-id"></span>
@@ -68,7 +68,7 @@
     <div id="thread"><div class="empty-state">
       Pick a session on the left, or start a new chat.<br/>All sessions live on your home desktop.</div></div>
     <div id="composer">
-      <textarea id="input" placeholder="Message the agent… (Enter to send, Shift+Enter newline)" enterkeyhint="return"></textarea>
+      <textarea id="input" placeholder="Message the agentâ€¦ (Enter to send, Shift+Enter newline)" enterkeyhint="return"></textarea>
       <button id="ring" title="Send" aria-label="Send">
         <span id="ringIcon">&#9654;</span>
       </button>
@@ -89,14 +89,14 @@
     <div class="box">
       <div class="modal-hdr-row">
         <h3 class="modal-title">Select Model</h3>
-        <button class="toolbtn modal-close-btn" id="modelModalClose">✕</button>
+        <button class="toolbtn modal-close-btn" id="modelModalClose">âœ•</button>
       </div>
       <div class="modal-subtitle">Switch active LLM provider or model for this session.</div>
       <div class="model-search-wrap">
-        <input id="modelSearchInput" placeholder="Search provider or model (e.g. claude, gpt, deepseek)…" autocomplete="off" />
+        <input id="modelSearchInput" placeholder="Search provider or model (e.g. claude, gpt, deepseek)â€¦" autocomplete="off" />
       </div>
       <div class="model-list-container" id="modelListContainer">
-        <div class="model-loading-msg">Loading available models…</div>
+        <div class="model-loading-msg">Loading available modelsâ€¦</div>
       </div>
       <div class="model-custom-sec">
         <div class="model-custom-hdr">
@@ -140,7 +140,7 @@
       <h3 class="modal-title">Hermes Uplink</h3>
       <div class="modal-subtitle">Enter the passphrase shown on your desktop launcher.</div>
       <label>Passphrase</label>
-      <input id="authInput" type="password" placeholder="••••••••" autocomplete="current-password" />
+      <input id="authInput" type="password" placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢" autocomplete="current-password" />
       <div class="diag" id="authDiag"></div>
        <div class="modal-actions">
         <button class="primary" id="authSubmit">Connect</button>
@@ -150,6 +150,6 @@
 
 <!-- vendored offline markdown renderer (no CDN); from marked v17 (MIT) -->
 <script src="vendor/marked.umd.js" integrity="sha256-AiMp3d2+0TNkBB0KHjcg0YnkUwVu5Orm3ythmSZqUss=" crossorigin="anonymous"></script>
-<script src="app.js" integrity="sha256-alzw2Ab1e80nLB1m8P2RpdL2PydX6XEb0I5sbcPQ1W4=" crossorigin="anonymous"></script>
+<script src="js/boot.js" integrity="sha256-9RjT28e6F1u5SW1RUP9tEmWfgrd5fPfzUyNuua7useQ=" crossorigin="anonymous"></script>
 </body>
 </html>

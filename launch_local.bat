@@ -15,9 +15,9 @@ REM    HERMES_PORT      port to bind      (default 8787)
 REM    HERMES_UPSTREAM  API Server URL    (default http://127.0.0.1:8642)
 REM
 REM  Setup (credentials, Hermes configuration, gateway restart) lives in
-REM  uplink_setup.py. "install" drops a launcher into the per-user Startup
+REM  uplink\configure.py. "install" drops a launcher into the per-user Startup
 REM  folder (no admin needed); it runs windows\autostart.vbs, which starts
-REM  proxy.py headless via pythonw.
+REM  the proxy (python -m uplink.server) headless via pythonw.
 REM =====================================================================
 setlocal
 cd /d "%~dp0"
@@ -37,12 +37,12 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-python uplink_setup.py
+python -m uplink.configure
 if errorlevel 1 (
   pause
   exit /b 1
 )
-python proxy.py --port "%HERMES_PORT%"
+python -m uplink.server --port "%HERMES_PORT%"
 if errorlevel 1 echo [!] Hermes Uplink stopped with an error.
 pause
 goto :eof
