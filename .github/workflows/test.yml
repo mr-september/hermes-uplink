@@ -10,7 +10,11 @@ permissions:
 
 jobs:
   python:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - name: Checkout repository
@@ -23,3 +27,7 @@ jobs:
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+
+      - name: Lint Linux launchers
+        if: runner.os == 'Linux'
+        run: shellcheck launch_local.sh launch_internet.sh

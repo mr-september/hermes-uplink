@@ -36,6 +36,7 @@ from uplink_common import (
     HEALTH_PROBE_VALUE,
     KEY_FILE,
     KEY_PATTERN,
+    LOCAL_LAUNCHER,
     PASS_FILE,
     PASS_PATTERN,
     enable_console_selection,
@@ -863,9 +864,9 @@ def main():
     API_KEY = API_KEY or read_credential(KEY_FILE, KEY_PATTERN)
     PASS = PASS or read_credential(PASS_FILE, PASS_PATTERN)
     if not API_KEY:
-        parser.error(f"set HERMES_API_KEY or provide a valid {KEY_FILE} (run launch_local.bat)")
+        parser.error(f"set HERMES_API_KEY or provide a valid {KEY_FILE} (run {LOCAL_LAUNCHER})")
     if not PASS:
-        parser.error(f"set UPLINK_PASSPHRASE or provide a valid {PASS_FILE} (run launch_local.bat)")
+        parser.error(f"set UPLINK_PASSPHRASE or provide a valid {PASS_FILE} (run {LOCAL_LAUNCHER})")
     validate_pinned_assets()
 
     UPSTREAM = upstream

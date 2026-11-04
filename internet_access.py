@@ -1,7 +1,7 @@
 """Configure public browser access to Hermes Uplink through Tailscale Funnel.
 
 This module intentionally owns the entire internet-access boundary.  Tailscale
-is an externally installed Windows service; no credentials or provider state
+is an externally installed system service; no credentials or provider state
 are stored in this repository.
 """
 
@@ -29,6 +29,8 @@ from uplink_common import (
     DEFAULT_UPSTREAM,
     HEALTH_PROBE_HEADER,
     HEALTH_PROBE_VALUE,
+    INTERNET_LAUNCHER,
+    LOCAL_LAUNCHER,
     PASS_FILE,
     PASS_PATTERN,
     ROOT,
@@ -39,7 +41,7 @@ from uplink_common import (
 )
 
 
-TAILSCALE_INSTALL_URL = "https://tailscale.com/download/windows"
+TAILSCALE_INSTALL_URL = "https://tailscale.com/download/" + ("windows" if os.name == "nt" else "linux")
 PUBLIC_PORT = 443
 LOCAL_TARGET_HOST = "127.0.0.1"
 LOCAL_PROXY_SERVER = "HermesUplink"
@@ -61,6 +63,9 @@ class TailscaleCommandError(InternetAccessError):
         self.args = tuple(args)
         self.result = result
         detail = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
+        if os.name != "nt" and "access denied" in detail.lower() and "--operator" not in detail:
+            # Linux tailscaled accepts changes only from root or its configured operator.
+            detail += "\nAllow this user to manage Tailscale once with: sudo tailscale set --operator=$USER"
         super().__init__(f"tailscale {' '.join(args)} failed: {detail}")
 
 
@@ -177,10 +182,12 @@ def find_tailscale_executable(
     environ: Mapping[str, str] | None = None,
     which: Callable[[str], str | None] = shutil.which,
 ) -> str | None:
-    """Find the official Windows CLI without relying on shell expansion."""
+    """Find the Tailscale CLI on PATH, then in the Windows install folders, without shell expansion."""
 
     env = os.environ if environ is None else environ
-    for name in ("tailscale.exe", "tailscale"):
+    # Linux looks only for the native CLI: under WSL interop, tailscale.exe would configure the Windows
+    # host's Funnel, whose 127.0.0.1 target is not this proxy.
+    for name in ("tailscale.exe", "tailscale") if os.name == "nt" else ("tailscale",):
         found = which(name)
         if found:
             return found
@@ -465,21 +472,11 @@ def ensure_local_proxy(
     if health(port):
         return
 
-    launcher = root / "launch_local.bat"
+    launcher = root / LOCAL_LAUNCHER
     if not launcher.is_file():
         raise InternetAccessError(f"Local launcher is missing: {launcher}")
-    print("[*] Local Hermes Uplink proxy is not healthy; starting launch_local.bat.")
-    if process_starter is None:
-        if os.name != "nt":
-            raise InternetAccessError("Automatic local-proxy startup is supported only on Windows.")
-        creation_flags = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
-        subprocess.Popen(
-            ["cmd.exe", "/d", "/c", "call", str(launcher)],
-            cwd=str(root),
-            creationflags=creation_flags,
-        )
-    else:
-        process_starter(launcher)
+    print(f"[*] Local Hermes Uplink proxy is not healthy; starting {LOCAL_LAUNCHER}.")
+    (process_starter or start_local_proxy)(launcher)
 
     deadline = monotonic() + PROXY_START_TIMEOUT_SECONDS
     while monotonic() < deadline:
@@ -491,10 +488,26 @@ def ensure_local_proxy(
     )
 
 
+def start_local_proxy(launcher: Path) -> None:
+    """Start the proxy through the host launcher; the caller waits for it to become healthy."""
+    if os.name == "nt":
+        # Setup and the foreground proxy run in their own console, which stays open.
+        subprocess.Popen(
+            ["cmd.exe", "/d", "/c", "call", str(launcher)],
+            cwd=str(launcher.parent),
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0),
+        )
+        return
+    # Linux: setup (if needed) runs here in this terminal, then the systemd user service is started.
+    result = subprocess.run(["bash", str(launcher), "start"], cwd=str(launcher.parent), check=False)
+    if result.returncode != 0:
+        raise InternetAccessError(f"{LOCAL_LAUNCHER} start failed (exit {result.returncode}).")
+
+
 def load_passphrase(root: Path = ROOT) -> str:
     value = read_credential(PASS_FILE, PASS_PATTERN, root)
     if value is None:
-        raise InternetAccessError("The Uplink passphrase is missing or invalid; run launch_local.bat first.")
+        raise InternetAccessError(f"The Uplink passphrase is missing or invalid; run {LOCAL_LAUNCHER} first.")
     return value
 
 
@@ -519,8 +532,8 @@ def build_client() -> TailscaleClient:
     executable = find_tailscale_executable()
     if executable is None:
         raise InternetAccessError(
-            "Tailscale is not installed or tailscale.exe is not available in PATH. "
-            f"Install it from {TAILSCALE_INSTALL_URL}, sign in, then run launch_internet.bat again."
+            "Tailscale is not installed or its CLI is not available in PATH. "
+            f"Install it from {TAILSCALE_INSTALL_URL}, sign in, then run {INTERNET_LAUNCHER} again."
         )
     return TailscaleClient(executable)
 

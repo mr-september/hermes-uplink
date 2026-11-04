@@ -1,6 +1,8 @@
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import threading
@@ -239,7 +241,23 @@ class InternetAccessTests(unittest.TestCase):
             sleeper=sleeper,
             monotonic=lambda: clock[0],
         )
-        self.assertEqual(started, [Path(__file__).resolve().parents[1] / "launch_local.bat"])
+        self.assertEqual(started, [Path(__file__).resolve().parents[1] / internet_access.LOCAL_LAUNCHER])
+
+    @unittest.skipIf(os.name == "nt", "Linux launcher")
+    def test_linux_proxy_start_runs_launcher_and_reports_its_failure(self):
+        launcher = Path(__file__).resolve().parents[1] / "launch_local.sh"
+        failed = subprocess.CompletedProcess(["bash"], 3)
+        with patch("internet_access.subprocess.run", return_value=failed) as run:
+            with self.assertRaises(internet_access.InternetAccessError) as context:
+                internet_access.start_local_proxy(launcher)
+        self.assertEqual(run.call_args.args[0], ["bash", str(launcher), "start"])
+        self.assertIn("exit 3", str(context.exception))
+
+    @unittest.skipIf(os.name == "nt", "Linux tailscaled operator")
+    def test_linux_access_denied_names_the_operator_fix(self):
+        result = internet_access.CommandResult(1, "", "Access denied: serve config denied")
+        error = internet_access.TailscaleCommandError(["funnel", "--bg"], result)
+        self.assertIn("sudo tailscale set --operator=$USER", str(error))
 
     def test_local_proxy_start_wait_fails_with_timeout(self):
         clock = [0.0]
