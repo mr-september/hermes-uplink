@@ -161,13 +161,13 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 - **File Uploads:** File and image uploads are currently unsupported.
 - **Single shared credential:** The passphrase grants full access; there are no per-user accounts or roles.
 - **Edge search:** Session filtering covers title and source, not message content.
-- **Gateway compatibility:** Current stock Hermes gateways (upstream `main` since `9bba78ef`, 2026-11) refuse streaming sends into sessions that existed before Uplink saw them — existing sessions become read-only until the gateway is patched. Apply [docs/patching-hermes.md](docs/patching-hermes.md) §3; details in [docs/gateway-requirements.md](docs/gateway-requirements.md).
+- **Sessions created outside Uplink:** the Hermes API server only runs turns in sessions it created, so Uplink sends into desktop, CLI, TUI, and messaging sessions through the `hermes` command on the host, which must be on the proxy's PATH (or set `HERMES_CLI`). Those turns show no interactive question cards; details in [docs/gateway-requirements.md](docs/gateway-requirements.md).
 
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md): components, request flows, security model, operations.
 - [docs/gateway-requirements.md](docs/gateway-requirements.md): which Hermes gateway features Uplink uses and what happens without each.
-- [docs/patching-hermes.md](docs/patching-hermes.md): a brief for your own Hermes agent to add the gateway features Uplink needs locally, if upstream has not merged them (§3 is currently required for sending in existing sessions).
+- [docs/patching-hermes.md](docs/patching-hermes.md): a brief for your own Hermes agent to add the gateway features Uplink needs locally, if upstream has not merged them.
 - [docs/clarify-protocol.md](docs/clarify-protocol.md): how interactive agent questions travel between gateway and client.
 - [docs/session-status.md](docs/session-status.md): mobile header, unread indicators, and the planned activity status.
 

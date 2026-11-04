@@ -7,15 +7,18 @@ at a tunnel or reverse proxy and forward to this process on localhost.
 
 import argparse
 import base64
+import collections
 import hashlib
 import ipaddress
 import json
 import logging
 import os
+import queue
 import re
 import secrets
 import select
 import socket
+import subprocess
 import sys
 import time
 import urllib.error
@@ -25,6 +28,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import BoundedSemaphore, Lock, Semaphore, Thread
 
+import hermes_native
 from uplink_common import (
     DEFAULT_PORT,
     DEFAULT_UPSTREAM,
@@ -91,6 +95,11 @@ CONTENT_TYPES = {
     ".ico": "image/x-icon",
 }
 TEXT_EXTENSIONS = (".html", ".js", ".css", ".webmanifest", ".json", ".svg")
+CHAT_STREAM_RE = re.compile(r"^/api/sessions/([^/?]+)/chat/stream$")
+RUN_STOP_RE = re.compile(r"^/v1/runs/([^/?]+)/stop$")
+# Session ids reach a CLI argv: refuse anything argparse could read as an option.
+SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
+NATIVE_STDERR_LINES = 20
 SCRIPT_TAG_RE = re.compile(r'<script\s+src="([^"]+)"\s+integrity="sha256-([^"]+)"')
 INLINE_SCRIPT_RE = re.compile(r"<script(?![^>]*\bsrc\b)", re.IGNORECASE)
 
@@ -491,10 +500,17 @@ class Handler(BaseHTTPRequestHandler):
         elif path_only in STATIC_FILES or path_only.startswith(("/vendor/", "/assets/")):
             self._serve_static(path_only)
         elif path_only.startswith(("/api/", "/v1/", "/health/")) or path_only == "/health":
-            if self._authed():
-                self._proxy(self.path, method)
-            else:
+            if not self._authed():
                 self._text(401, b"uplink authentication required")
+                return
+            chat = CHAT_STREAM_RE.match(path_only) if method == "POST" else None
+            stop = RUN_STOP_RE.match(path_only) if method == "POST" else None
+            if chat:
+                self._chat_stream(urllib.parse.unquote(chat.group(1)))
+            elif stop and hermes_native.RUN_ID_RE.match(urllib.parse.unquote(stop.group(1))):
+                self._native_stop(urllib.parse.unquote(stop.group(1)))
+            else:
+                self._proxy(self.path, method)
         else:
             self._text(404, b"not found")
 
@@ -526,6 +542,150 @@ class Handler(BaseHTTPRequestHandler):
                 self._relay(response)
         finally:
             PROXY_SEMAPHORE.release()
+
+    def _chat_stream(self, session_id):
+        """A turn: the API server's own sessions stream over REST; every other session goes through the
+        Hermes CLI (hermes_native), because the API server refuses turns into sessions it does not own."""
+        if not PROXY_SEMAPHORE.acquire(blocking=False):
+            self._text(503, b"proxy is busy", {"Retry-After": "5"})
+            return
+        try:
+            body = self._read_body(MAX_REQUEST_BODY)
+            if body is READ_ERROR:
+                return
+            text = None
+            if SESSION_ID_RE.match(session_id) and hermes_native.RUNTIME.available():
+                source = self._session_source(session_id)
+                if hermes_native.wants_native(source):
+                    try:
+                        payload = json.loads(body.decode("utf-8")) if body else {}
+                    except (UnicodeDecodeError, ValueError):
+                        payload = {}
+                    text = payload.get("input") if isinstance(payload, dict) else None
+            if isinstance(text, str) and text.strip():
+                self._native_stream(session_id, text)
+                return
+            response = self._open_upstream(self.path, "POST", body)
+            if response is not None:
+                self._relay(response)
+        finally:
+            PROXY_SEMAPHORE.release()
+
+    def _session_source(self, session_id):
+        """The session's ``source``, or None when the API server does not report one."""
+        request = urllib.request.Request(UPSTREAM + "/api/sessions/" + urllib.parse.quote(session_id, safe=""))
+        if API_KEY:
+            request.add_header("Authorization", "Bearer " + API_KEY)
+        try:
+            with build_opener().open(request, timeout=30) as response:
+                session = json.loads(response.read(MAX_ERROR_BODY).decode("utf-8")).get("session")
+        except Exception:  # unknown source: the REST stream answers for itself
+            return None
+        return session.get("source") if isinstance(session, dict) else None
+
+    def _native_stream(self, session_id, text):
+        try:
+            process = hermes_native.spawn_turn(session_id)
+        except (hermes_native.NativeUnavailable, OSError) as error:
+            hermes_native.RUNTIME.invalidate()
+            LOGGER.error("native turn could not start: %s", error)
+            self._text(502, f"Hermes CLI unavailable: {error}".encode("utf-8"))
+            return
+        run_id = hermes_native.RUNS.start(session_id)
+        translator = hermes_native.Translator(session_id, run_id)
+        events = queue.Queue()
+        stderr_tail = collections.deque(maxlen=NATIVE_STDERR_LINES)
+
+        def feed():
+            try:
+                process.stdin.write(text.encode("utf-8"))
+                process.stdin.close()
+            except OSError:
+                pass
+
+        def read_stdout():
+            try:
+                for line in process.stdout:
+                    events.put(line)
+            except (OSError, ValueError):
+                pass
+            finally:
+                events.put(None)
+                process.stdout.close()
+
+        def read_stderr():
+            try:
+                for line in process.stderr:
+                    stderr_tail.append(line.decode("utf-8", "replace").rstrip())
+            except (OSError, ValueError):
+                pass
+            finally:
+                process.stderr.close()
+
+        for target in (feed, read_stdout, read_stderr):
+            Thread(target=target, daemon=True).start()
+        LOGGER.info("native turn %s on session %s", run_id, session_id)
+        self.send_response(200)
+        self._security_headers()
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.close_connection = True
+        self.end_headers()
+        self.connection.settimeout(UPSTREAM_TIMEOUT)
+        try:
+            self._write_frames(translator.started())
+            while True:
+                try:
+                    line = events.get(timeout=SSE_KEEPALIVE_INTERVAL)
+                except queue.Empty:
+                    self.wfile.write(b": ping\n\n")
+                    self.wfile.flush()
+                    continue
+                if line is None:
+                    break
+                try:
+                    event = json.loads(line.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                self._write_frames(translator.translate(event))
+            if not translator.finished:
+                try:
+                    code = process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    code = None
+                detail = next((line for line in reversed(stderr_tail) if line.strip()), "")
+                message = f"Hermes CLI ended without a result (exit {code})" + (f": {detail}" if detail else "")
+                self._write_frames(translator.failure(message))
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.timeout):
+            LOGGER.debug("client disconnected during native turn %s", run_id)
+        except Exception:
+            LOGGER.exception("native turn stream interrupted")
+        finally:
+            if process.poll() is None:
+                # Detaches only: the owner keeps running the turn; Stop interrupts it through RUNS.
+                process.kill()
+            if translator.finished:
+                hermes_native.RUNS.finish(run_id)
+
+    def _write_frames(self, frames):
+        for event, data in frames:
+            self.wfile.write(hermes_native.sse(event, data))
+        if frames:
+            self.wfile.flush()
+
+    def _native_stop(self, run_id):
+        body = self._read_body(MAX_AUTH_BODY)
+        if body is READ_ERROR:
+            return
+        session_id = hermes_native.RUNS.session_of(run_id)
+        if session_id is None:
+            self._send(404, "application/json", json.dumps({"error": {"message": "run not found"}}))
+            return
+        ok, reason = hermes_native.interrupt(session_id)
+        LOGGER.info("native stop %s on session %s: %s", run_id, session_id, reason)
+        status = 200 if ok else 502
+        self._send(status, "application/json", json.dumps({"ok": ok, "status": reason}))
 
     def _open_upstream(self, path, method, body):
         """Open the upstream request, or send the error response and return None."""
@@ -667,6 +827,11 @@ def main():
         action="store_true",
         help="allow an HTTPS upstream outside loopback; use only with an explicitly trusted server",
     )
+    parser.add_argument(
+        "--hermes-cli",
+        default=os.environ.get("HERMES_CLI", ""),
+        help="the hermes launcher that sends turns into sessions the API server does not own (default: hermes on PATH)",
+    )
     args = parser.parse_args()
 
     if args.update_hashes:
@@ -705,6 +870,9 @@ def main():
 
     UPSTREAM = upstream
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    hermes_native.RUNTIME.configure(args.hermes_cli or None)
+    if not hermes_native.RUNTIME.available():
+        LOGGER.warning("hermes command not found: sessions created outside the API server stay read-only")
     enable_console_selection()
     httpd = UplinkServer((args.host, args.port), Handler)
     try:

@@ -54,30 +54,7 @@ Port the later of the two clarify commits against your checkout's current clarif
 
 Without section 2, a clarify call from the agent has no card in Uplink and waits for its timeout; avoid prompts that depend on it.
 
-## 3. Admissions for pre-existing sessions (required since upstream `9bba78ef`)
-
-**Symptom:** every send to a session that already exists (created by the desktop app, CLI, or a messaging surface) fails instantly: the SSE stream opens, emits `run.started`, then a single `error` frame with `permission_denied`, then `done`. No user message is admitted. Sends in brand-new Uplink sessions work, which makes it look intermittent.
-
-**Cause:** two matching foreign-source gates compare the session row's `source` against API-only labels: `admit_api_steps()` in `gateway/session_api_turn.py` (`existing['source'] not in ('api_server', 'bot_room')`), and the storage-source binding checks in `gateway/session_api.py` (the bind write raises `permission_denied` when `row['source'] != storage_source`, with the same equality mirrored in the live-session pre-check and `restore_api_session()`). Gateways that stamp their own local sessions `local` or `desktop` therefore fail the first gate, and — after widening only the first — the second.
-
-**Verified against** NousResearch/hermes-agent `main` as of the 2026-11-01 update (symbols: `admit_api_steps`, `authority.db.get_session`, `_BINDING_PREFIX` binding write, `restore_api_session`).
-
-1. In `admit_api_steps()`, widen the tuple to include the source labels your gateway legitimately stamps on its own local sessions — on the reference checkout: `('api_server', 'bot_room', 'local', 'desktop')`.
-2. In `gateway/session_api.py`, add one shared predicate and use it at all three equality sites instead of `!=` — the live-session pre-check in the bind path, the bind write, and the `restore_api_session()` verification:
-
-```python
-_LOCAL_STORAGE_SOURCES = frozenset({'local', 'desktop'})
-
-def storage_source_matches(row_source, storage_source):
-    return (row_source == storage_source
-            or (storage_source == 'api_server' and row_source in _LOCAL_STORAGE_SOURCES))
-```
-
-Keep genuinely remote surfaces (e.g. `telegram`, `discord`) refused at both gates — that is the check's original purpose of not admitting into another adapter's session. The persisted binding keeps `storage_source='api_server'` (it names the owning adapter, not the surface stamp).
-
-**Test:** create sessions whose `source` is `local` and `desktop`; call `admit_api_turn` (or POST `/api/sessions/{id}/chat/stream`) and assert admission instead of `permission_denied`. The reference fork ships this as `tests/gateway/test_api_local_surface_admission.py`. The test must fail on the unpatched code.
-
-**Check:** restart the gateway, then in Uplink open any older session and send — the message admits and the agent answers.
+Do not patch the API server to admit turns into sessions it does not own (desktop, CLI, TUI, or messaging sessions). Uplink sends those through the Hermes CLI, and widening the API server's source checks cannot work: it would rebind the conversation's route away from its owner ([gateway-requirements.md](gateway-requirements.md)).
 
 ## After patching
 
