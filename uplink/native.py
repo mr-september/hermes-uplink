@@ -5,21 +5,22 @@ admits turns only into sessions it created (``source`` ``api_server`` or ``bot_r
 the desktop app, CLI, TUI or a messaging platform is refused with ``permission_denied``. Such turns go through
 the documented ``hermes chat --resume <id> --oneshot --query-file - --format stream-json`` instead, which
 submits through the session's owner like every other local surface, and its JSONL events are translated into
-the SSE frames the client already consumes. Stop goes through ``hermes_interrupt.py``.
+the SSE frames the client already consumes. Stop goes through ``interrupt_helper.py``.
 
 Standard library only; Hermes's interpreter and bootstrap come from ``hermes --print-runtime-command``.
 """
+import collections
 import json
-import os
+import queue
 import re
 import secrets
 import shutil
 import subprocess
 import time
-from threading import Lock
+from pathlib import Path
+from threading import Lock, Thread
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-INTERRUPT_HELPER = os.path.join(HERE, "hermes_interrupt.py")
+INTERRUPT_HELPER = str(Path(__file__).with_name("interrupt_helper.py"))
 # Sources whose sessions the API server owns: these keep the REST stream (clarify cards, run stop).
 API_SOURCES = frozenset({"api_server", "bot_room"})
 RUN_PREFIX = "uplink-native-"
@@ -27,6 +28,7 @@ RUN_ID_RE = re.compile(r"^" + re.escape(RUN_PREFIX) + r"[A-Za-z0-9_-]{16,64}$")
 RESOLVE_TIMEOUT = 60
 INTERRUPT_TIMEOUT = 60
 RUN_TTL = 24 * 60 * 60
+STDERR_TAIL_LINES = 20
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 # The bootstrap's last statement runs the CLI module; the helper replaces exactly this tail.
 _MAIN_TAIL = "runpy.run_module('hermes_cli.main', run_name='__main__', alter_sys=True)"
@@ -159,8 +161,8 @@ def interrupt(session_id):
 class Translator:
     """``hermes chat --format stream-json`` events -> the API server's session-stream SSE events.
 
-    Event names and fields match what ``/api/sessions/{id}/chat/stream`` emits and ``web/app.js``'s
-    ``handleFrame`` reads; every frame carries ``run_id`` so the client's Stop reaches ``RUNS``."""
+    Event names and fields match what ``/api/sessions/{id}/chat/stream`` emits and the client's
+    ``handleFrame`` (web/js/stream.js) reads; every frame carries ``run_id`` so the client's Stop reaches ``RUNS``."""
 
     def __init__(self, session_id, run_id):
         self.session_id, self.run_id = session_id, run_id
@@ -229,3 +231,83 @@ def sse(event, data):
 def spawn_turn(session_id):
     return subprocess.Popen(RUNTIME.turn_command(session_id), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, creationflags=NO_WINDOW)
+
+
+class Turn:
+    """One turn through the CLI: its process, its run id, and the SSE byte stream it produces."""
+
+    def __init__(self, session_id, text):
+        """Start the CLI. Raises NativeUnavailable or OSError (and invalidates the runtime) when it cannot."""
+        try:
+            self._process = spawn_turn(session_id)
+        except (NativeUnavailable, OSError):
+            RUNTIME.invalidate()
+            raise
+        self.session_id = session_id
+        self.run_id = RUNS.start(session_id)
+        self._translator = Translator(session_id, self.run_id)
+        self._lines = queue.Queue()
+        self._stderr_tail = collections.deque(maxlen=STDERR_TAIL_LINES)
+        for target, arg in ((self._feed, text), (self._read_stdout, None), (self._read_stderr, None)):
+            Thread(target=target, args=() if arg is None else (arg,), daemon=True).start()
+
+    def _feed(self, text):
+        try:
+            self._process.stdin.write(text.encode("utf-8"))
+            self._process.stdin.close()
+        except OSError:
+            pass
+
+    def _read_stdout(self):
+        try:
+            for line in self._process.stdout:
+                self._lines.put(line)
+        except (OSError, ValueError):
+            pass
+        finally:
+            self._lines.put(None)
+            self._process.stdout.close()
+
+    def _read_stderr(self):
+        try:
+            for line in self._process.stderr:
+                self._stderr_tail.append(line.decode("utf-8", "replace").rstrip())
+        except (OSError, ValueError):
+            pass
+        finally:
+            self._process.stderr.close()
+
+    def frames(self, keepalive):
+        """Yield SSE bytes until the turn ends, and an SSE comment every ``keepalive`` seconds of silence.
+
+        Closing the generator early (the client went away) only detaches: the session's owner keeps running the
+        turn, and Stop interrupts it through ``RUNS``."""
+        translator = self._translator
+        try:
+            yield from (sse(event, data) for event, data in translator.started())
+            while True:
+                try:
+                    line = self._lines.get(timeout=keepalive)
+                except queue.Empty:
+                    yield b": ping\n\n"
+                    continue
+                if line is None:
+                    break
+                try:
+                    event = json.loads(line.decode("utf-8", "replace"))
+                except ValueError:
+                    continue
+                yield from (sse(name, data) for name, data in translator.translate(event))
+            if not translator.finished:
+                try:
+                    code = self._process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    code = None
+                detail = next((line for line in reversed(self._stderr_tail) if line.strip()), "")
+                message = f"Hermes CLI ended without a result (exit {code})" + (f": {detail}" if detail else "")
+                yield from (sse(name, data) for name, data in translator.failure(message))
+        finally:
+            if self._process.poll() is None:
+                self._process.kill()
+            if translator.finished:
+                RUNS.finish(self.run_id)

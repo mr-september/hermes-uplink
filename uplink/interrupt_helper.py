@@ -1,11 +1,12 @@
 """Interrupt the running turn of one Hermes session (run inside Hermes's own runtime, not by Uplink's Python).
 
-The proxy launches this through the interpreter and bootstrap that ``hermes --print-runtime-command`` reports
-(see hermes_native.helper_command), so ``hermes_cli`` is importable. It speaks the gateway owner's protocol the
-way the classic CLI's ``/stop`` does: attach to the session, then ``session.interrupt`` with the execution
-generation the owner reports. Killing a ``hermes chat`` client never stops a turn (the owner keeps running it).
+``uplink.native`` launches this file by path through the interpreter and bootstrap that
+``hermes --print-runtime-command`` reports, so ``hermes_cli`` is importable and nothing from Uplink is. It speaks
+the gateway owner's protocol the way the classic CLI's ``/stop`` does: attach to the session, then
+``session.interrupt`` with the execution generation the owner reports. Killing a ``hermes chat`` client never
+stops a turn (the owner keeps running it).
 
-Usage: hermes_interrupt.py SESSION_ID    -> prints one JSON line {"ok": bool, "reason": str}; exit 0 when ok.
+Usage: interrupt_helper.py SESSION_ID    -> prints one JSON line {"ok": bool, "reason": str}; exit 0 when ok.
 """
 import asyncio
 import json

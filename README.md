@@ -8,7 +8,7 @@ Instead of relying on bandwidth-heavy screen sharing or transferring project dat
 
 [![GitHub release](https://img.shields.io/github/release/mr-september/hermes-uplink.svg)](https://github.com/mr-september/hermes-uplink/releases)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-yellow.svg)](web/app.js)
+[![Vanilla JS](https://img.shields.io/badge/Vanilla-JS-yellow.svg)](web/js/)
 
 ---
 
@@ -54,10 +54,10 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for components, flows, the security model
 ```mermaid
 flowchart LR
     subgraph EDGE["Edge device (phone / laptop)"]
-        B[Browser<br/>index.html + app.js<br/>vanilla JS, no build]
+        B[Browser<br/>index.html + ES modules<br/>vanilla JS, no build]
     end
     subgraph DESKTOP["Home host (Windows or Linux, native, no WSL2 or Docker)"]
-        P[proxy.py<br/>loopback HTTP<br/>key injected server-side]
+        P[uplink.server<br/>loopback HTTP<br/>key injected server-side]
         A[Hermes gateway<br/>API Server :8642]
         R[(Shared session store<br/>Hermes home directory<br/>desktop / tui / cron / cli)]
         TS[Tailscale client<br/>Funnel HTTPS]
@@ -179,8 +179,8 @@ The repository is small and has no build step:
 
 | Path | Contents |
 |---|---|
-| `proxy.py`, `internet_access.py`, `uplink_setup.py`, `uplink_common.py` | Python, standard library only |
-| `web/` | The client the proxy serves |
+| `uplink/` | The Python package (proxy, setup, Funnel control), standard library only; run as `python -m uplink.<module>` from the repository root |
+| `web/` | The client the proxy serves (HTML, CSS, and native ES modules in `web/js/`) |
 | `launch_local.bat`, `launch_internet.bat` | Windows entry points |
 | `launch_local.sh`, `launch_internet.sh` | Linux entry points (systemd user service) |
 | `windows/` | Login auto-start and service helpers |
@@ -192,9 +192,9 @@ Run the local unit tests with:
 python -m unittest discover -s tests -v    # python3 on Linux
 ```
 
-After editing a pinned file in `web/` (`index.html`, `app.js`, `app.css`, `sw.js`, `vendor/marked.umd.js`), run `python proxy.py --update-hashes`; the proxy refuses to start while the digests in `web/pinned-hashes.json` are stale.
+After editing any `.html`, `.js`, or `.css` file in `web/`, run `python -m uplink.assets --update`; the proxy refuses to start while the digests in `web/pinned-hashes.json` are stale.
 
-The proxy tests cover authentication, cookie sessions, API-key injection, SSE responses, malformed requests, pinned-asset integrity, and loopback validation. Internet-access tests use a fake Tailscale command runner and do not require a Tailscale account.
+The server tests cover authentication, cookie sessions, API-key injection, SSE responses, malformed requests, pinned-asset integrity and serving, and loopback validation. Internet-access tests use a fake Tailscale command runner and do not require a Tailscale account.
 
 Before release, perform a live acceptance test from an external network:
 

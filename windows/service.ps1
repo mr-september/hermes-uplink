@@ -20,7 +20,7 @@ if (-not [int]::TryParse($rawPid, [ref]$targetPid) -or $targetPid -le 0) {
 
 $process = Get-CimInstance Win32_Process -Filter "ProcessId=$targetPid"
 $commandLine = if ($process) { [string]$process.CommandLine } else { "" }
-$scriptPattern = '(?i)(^|[\s\\/"''])proxy\.py["'']?(\s|$)'
+$scriptPattern = '(?i)\s-m\s+uplink\.server(\s|$)'
 $listening = Get-NetTCPConnection -State Listen -LocalPort $Port -OwningProcess $targetPid -ErrorAction SilentlyContinue
 $isHermesProxy = $process -and
     $process.Name -match '^(pythonw?|py)(\.exe)?$' -and

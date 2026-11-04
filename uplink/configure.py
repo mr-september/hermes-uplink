@@ -1,7 +1,7 @@
 """Prepare the local proxy: validate settings, create credentials, configure the Hermes gateway.
 
-    python uplink_setup.py          full setup (idempotent), then print the connection banner
-    python uplink_setup.py --check  validate settings and credentials only; change nothing
+    python -m uplink.configure          full setup (idempotent), then print the connection banner
+    python -m uplink.configure --check  validate settings and credentials only; change nothing
 
 Hermes is always invoked with an argument list, never through a shell, so credential
 file contents cannot inject commands.
@@ -10,15 +10,13 @@ file contents cannot inject commands.
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from uplink_common import (
-    DEFAULT_PORT,
+from .settings import (
     INTERNET_LAUNCHER,
     KEY_FILE,
     KEY_PATTERN,
@@ -28,7 +26,7 @@ from uplink_common import (
     ROOT,
     SettingsError,
     ensure_credentials,
-    parse_port,
+    env_port,
     read_credential,
 )
 
@@ -66,13 +64,13 @@ def configure_hermes(hermes: str, api_key: str) -> None:
 
 
 def check() -> None:
-    parse_port(os.environ.get("HERMES_PORT", str(DEFAULT_PORT)))
+    env_port()
     if read_credential(KEY_FILE, KEY_PATTERN) is None or read_credential(PASS_FILE, PASS_PATTERN) is None:
         raise SettingsError(f"Credentials are missing or invalid; run {LOCAL_LAUNCHER} once.")
 
 
 def setup() -> None:
-    port = parse_port(os.environ.get("HERMES_PORT", str(DEFAULT_PORT)))
+    port = env_port()
     hermes = shutil.which("hermes")
     if hermes is None:
         raise SettingsError("The 'hermes' command-line interface was not found in your PATH.")
@@ -91,7 +89,7 @@ def setup() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(prog="python -m uplink.configure", description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="validate only; change nothing")
     args = parser.parse_args(argv)
     try:

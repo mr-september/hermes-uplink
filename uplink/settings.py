@@ -1,4 +1,4 @@
-"""Shared by the Python entry points and launchers: defaults, credential files, console helper."""
+"""Defaults, host paths, credential files, and the console helper shared by the entry points."""
 
 from __future__ import annotations
 
@@ -16,9 +16,11 @@ DEFAULT_PORT = 8787
 HEALTH_PROBE_HEADER = "X-Hermes-Uplink-Health"
 HEALTH_PROBE_VALUE = "1"
 
-ROOT = Path(__file__).resolve().parent
+# The repository root: credentials, the pid file, the launchers, and web/ live here.
+ROOT = Path(__file__).resolve().parent.parent
 KEY_FILE = ".uplink-key.txt"
 PASS_FILE = ".uplink-pass.txt"
+PID_FILE = ROOT / ".uplink.pid"
 KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]{32}")
 PASS_PATTERN = re.compile(r"[A-Za-z0-9]{20,}")
 
@@ -37,6 +39,10 @@ def parse_port(text: str) -> int:
     return int(text)
 
 
+def env_port() -> int:
+    return parse_port(os.environ.get("HERMES_PORT", str(DEFAULT_PORT)))
+
+
 def read_credential(name: str, pattern: re.Pattern, root: Path = ROOT) -> str | None:
     """Return the stripped contents of a credential file, or None if missing or malformed."""
     try:
@@ -47,7 +53,7 @@ def read_credential(name: str, pattern: re.Pattern, root: Path = ROOT) -> str | 
 
 
 def restrict_to_current_user(path: Path) -> None:
-    """Drop inherited ACL entries so only the current user can read or change the file (Windows)."""
+    """Make the file readable and writable by the current user only (NTFS ACL on Windows, mode 0600 elsewhere)."""
     if os.name != "nt":
         path.chmod(0o600)
         return
@@ -57,11 +63,6 @@ def restrict_to_current_user(path: Path) -> None:
     )
     if result.returncode != 0:
         raise SettingsError(f"Could not restrict permissions on {path.name}: {result.stdout.strip() or result.stderr.strip()}")
-
-
-def _write_credential(name: str, value: str, root: Path) -> None:
-    with open(root / name, "w", encoding="ascii", newline="") as stream:
-        stream.write(value)
 
 
 def ensure_credentials(root: Path = ROOT) -> tuple[str, str, list[str]]:
@@ -77,13 +78,13 @@ def ensure_credentials(root: Path = ROOT) -> tuple[str, str, list[str]]:
         if (root / KEY_FILE).exists():
             raise SettingsError(f"{KEY_FILE} has an invalid format; delete it to generate a new key.")
         key = base64.urlsafe_b64encode(secrets.token_bytes(24)).decode("ascii")
-        _write_credential(KEY_FILE, key, root)
+        (root / KEY_FILE).write_text(key, encoding="ascii", newline="")
         notes.append("Generated API key.")
     passphrase = read_credential(PASS_FILE, PASS_PATTERN, root)
     if passphrase is None:
         alphabet = string.ascii_letters + string.digits
         passphrase = "".join(secrets.choice(alphabet) for _ in range(24))
-        _write_credential(PASS_FILE, passphrase, root)
+        (root / PASS_FILE).write_text(passphrase, encoding="ascii", newline="")
         notes.append("Generated passphrase.")
     for name in (KEY_FILE, PASS_FILE):
         restrict_to_current_user(root / name)
