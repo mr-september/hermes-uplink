@@ -42,7 +42,7 @@ Instead of relying on bandwidth-heavy screen sharing or transferring project dat
 ## Design Principles
 
 - **Zero build steps:** The client is plain HTML, CSS, and JS with one vendored dependency.
-- **Native execution:** Driven by Hermes's first-party API Server running natively on Windows.
+- **Native execution:** Driven by Hermes's first-party API Server running natively on Windows or Linux.
 - **Secure architecture:** A loopback-only standard-library proxy keeps the API key on the host desktop; remote access is provided through Tailscale Funnel.
 - **Standalone:** Uplink runs independently of the Hermes-agent UI packages.
 - **Provider discipline:** Internet access has one implementation: Tailscale Funnel. The repository does not bundle tunnel binaries or credentials.
@@ -56,10 +56,10 @@ flowchart LR
     subgraph EDGE["Edge device (phone / laptop)"]
         B[Browser<br/>index.html + app.js<br/>vanilla JS, no build]
     end
-    subgraph DESKTOP["Home desktop (Windows, native, NO WSL2)"]
+    subgraph DESKTOP["Home host (Windows or Linux, native, no WSL2 or Docker)"]
         P[proxy.py<br/>loopback HTTP<br/>key injected server-side]
         A[Hermes gateway<br/>API Server :8642]
-        R[(Shared session store<br/>%LOCALAPPDATA%\hermes\sessions<br/>desktop / tui / cron / cli)]
+        R[(Shared session store<br/>Hermes home directory<br/>desktop / tui / cron / cli)]
         TS[Tailscale client<br/>Funnel HTTPS]
     end
     B -- "HTTPS via stable Funnel URL<br/>(no API key in browser)" --> TS
@@ -85,10 +85,10 @@ flowchart LR
 
 ## Prerequisites
 
-- **Windows 10 or later.**
-- **Python 3** available in PATH.
+- **Windows 10 or later**, or **Linux**. On Linux, background running and auto-start use a systemd user service; without systemd, run the proxy in the foreground.
+- **Python 3** available in PATH (`python3` on Linux).
 - **Hermes CLI** available in PATH.
-- **Tailscale for Windows** installed and signed in on the host desktop. Install it from the [official Windows download](https://tailscale.com/download/windows).
+- **Tailscale** installed and signed in on the host, from the [Windows](https://tailscale.com/download/windows) or [Linux](https://tailscale.com/download/linux) download. On Linux, Uplink runs as your user, so allow that user to change Tailscale settings once with `sudo tailscale set --operator=$USER`; the launcher prints this command if Tailscale refuses.
 - **No Python package installation is required.** The proxy and internet-access controller use the Python standard library.
 
 The phone or laptop used as the edge browser does not need Tailscale installed. Tailscale Funnel is available on all plans, but Tailscale's free Personal plan is sufficient for personal/non-commercial use. Review the [current Tailscale plan terms](https://tailscale.com/pricing) for your situation. Funnel requires no router port forwarding, public IP, or custom domain.
@@ -97,13 +97,13 @@ The phone or laptop used as the edge browser does not need Tailscale installed. 
 
 ### Internet Access (the one command you need)
 
-Run **`launch_internet.bat`** on the host desktop. It handles everything: if the local proxy is not already running, it automatically starts `launch_local.bat` first (configuring the Hermes API Server, generating the API key and passphrase, restarting the gateway, and starting the proxy on `http://127.0.0.1:8787`), then:
+Run **`launch_internet.bat`** on a Windows host or **`./launch_internet.sh`** on a Linux host. It handles everything: if the local proxy is not already running, it automatically starts it first (configuring the Hermes API Server, generating the API key and passphrase, restarting the gateway, and starting the proxy on `http://127.0.0.1:8787`). On Windows this opens `launch_local.bat` in its own console; on Linux, setup runs in the current terminal and the proxy starts as a systemd user service (`./launch_local.sh start`). It then:
 
 1. starts the local proxy itself if needed;
 2. guides you through installing/signing in to Tailscale if necessary;
 3. configures Tailscale Funnel for `127.0.0.1:8787`;
 4. verifies that the public route belongs to Uplink; and
-5. displays and copies the stable HTTPS URL.
+5. displays the stable HTTPS URL (and copies it to the clipboard on Windows).
 
 The terminal prints a **passphrase** required for remote access. Treat it as a full-access password: anyone who has it can read existing sessions and invoke the capabilities exposed by Hermes.
 
@@ -113,11 +113,13 @@ The launcher stores no Tailscale credentials, tunnel identifiers, or hostnames i
 
 ### Local-only or auto-start (optional)
 
-If you only want the local `http://127.0.0.1:8787` page without internet access, or you want it to start at login, run **`launch_local.bat`** directly:
+If you only want the local `http://127.0.0.1:8787` page without internet access, or you want it to start at login, run **`launch_local.bat`** (Windows) or **`./launch_local.sh`** (Linux) directly. Both take the same commands:
 
-- **`launch_local.bat`** — start the local proxy in the foreground and print the passphrase.
-- **`launch_local.bat install`** — start the proxy automatically at login (no administrator privileges needed).
-- **`launch_local.bat start|stop|status|uninstall`** — manage the background proxy.
+- **no argument** — start the local proxy in the foreground and print the passphrase.
+- **`install`** — start the proxy automatically at login (no administrator privileges needed). On Linux this enables the `hermes-uplink` systemd user service.
+- **`start|stop|status|uninstall`** — manage the background proxy.
+
+On Linux, systemd user services stop when you log out. For a host that should serve Uplink with nobody logged in, including after a reboot, run `sudo loginctl enable-linger $USER` once; the Hermes gateway needs the same if it runs as a user service. The service records the `PATH`, `HERMES_PORT`, `HERMES_UPSTREAM` and `HERMES_CLI` of the shell that ran `start` or `install`; rerun either after changing them. Logs: `journalctl --user -u hermes-uplink`.
 
 ### Connection Methods
 
@@ -136,7 +138,7 @@ The interactive launcher provides:
 - **Status:** Reports Tailscale state and the configured public route.
 - **Disable:** Disables only the Uplink Funnel route after verifying ownership. It does not uninstall Tailscale or disconnect your tailnet.
 
-When launched by double-click, the menu remains open after each operation, reports whether it completed or failed, and returns to the menu. Choose **Exit** to close it. Direct command forms such as `launch_internet.bat status` pause after completion so their result remains visible.
+On Windows, when launched by double-click, the menu remains open after each operation, reports whether it completed or failed, and returns to the menu. Choose **Exit** to close it. Direct command forms such as `launch_internet.bat status` pause after completion so their result remains visible.
 
 The launcher never uses a global Funnel reset and refuses to overwrite an unrelated Tailscale Serve or Funnel route on port 443.
 
@@ -148,14 +150,14 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 - **Session Authentication:** The passphrase is accepted only by a POST authentication endpoint. The proxy issues a short-lived HttpOnly browser session cookie.
 - **Public Endpoint, Application Gate:** Tailscale Funnel makes the HTTPS endpoint publicly reachable; the Uplink passphrase remains the application-level authentication gate.
 - **Loopback Boundary:** The proxy listens only on localhost. The Funnel target is `http://127.0.0.1:8787`.
-- **Credential files:** `.uplink-key.txt` and `.uplink-pass.txt` are git-ignored and restricted to the current Windows user (inherited ACL entries are removed on every setup run).
+- **Credential files:** `.uplink-key.txt` and `.uplink-pass.txt` are git-ignored and restricted to the current user on every setup run: inherited ACL entries are removed on Windows, and the mode is set to 0600 on Linux.
 - **No Tunnel Secrets in Repository:** Tailscale manages its own machine credentials outside the checkout.
 - **Full Agent Privilege:** A connected session can read existing sessions and invoke full Hermes capabilities. Treat the passphrase as a full-access credential.
 
 ## Limitations
 
-- **Host platform:** The bundled launchers and automated setup support Windows hosts only.
-- **Host must stay online:** Remote access stops if the desktop sleeps, reboots before Tailscale reconnects, or the local proxy/gateway stops. After a reboot or login, the Funnel route resumes automatically once Tailscale reconnects, because it is configured with the `--bg` background flag; you do not need to re-run `launch_internet.bat`.
+- **Host platform:** The bundled launchers and automated setup support Windows hosts and Linux hosts with systemd. macOS hosts have no launcher.
+- **Host must stay online:** Remote access stops if the desktop sleeps, reboots before Tailscale reconnects, or the local proxy/gateway stops. After a reboot or login, the Funnel route resumes automatically once Tailscale reconnects, because it is configured with the `--bg` background flag; you do not need to re-run the internet launcher.
 - **Public exposure:** Anyone who discovers the URL can reach the application authentication gate. **Protect the passphrase and consider the endpoint public.**
 - **Theming:** sizes and colours are fixed.
 - **File Uploads:** File and image uploads are currently unsupported.
@@ -179,7 +181,8 @@ The repository is small and has no build step:
 |---|---|
 | `proxy.py`, `internet_access.py`, `uplink_setup.py`, `uplink_common.py` | Python, standard library only |
 | `web/` | The client the proxy serves |
-| `launch_local.bat`, `launch_internet.bat` | Entry points |
+| `launch_local.bat`, `launch_internet.bat` | Windows entry points |
+| `launch_local.sh`, `launch_internet.sh` | Linux entry points (systemd user service) |
 | `windows/` | Login auto-start and service helpers |
 | `tests/` | `unittest` suites |
 

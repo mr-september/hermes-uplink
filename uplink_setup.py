@@ -19,8 +19,10 @@ from pathlib import Path
 
 from uplink_common import (
     DEFAULT_PORT,
+    INTERNET_LAUNCHER,
     KEY_FILE,
     KEY_PATTERN,
+    LOCAL_LAUNCHER,
     PASS_FILE,
     PASS_PATTERN,
     ROOT,
@@ -66,7 +68,7 @@ def configure_hermes(hermes: str, api_key: str) -> None:
 def check() -> None:
     parse_port(os.environ.get("HERMES_PORT", str(DEFAULT_PORT)))
     if read_credential(KEY_FILE, KEY_PATTERN) is None or read_credential(PASS_FILE, PASS_PATTERN) is None:
-        raise SettingsError("Credentials are missing or invalid; run launch_local.bat once.")
+        raise SettingsError(f"Credentials are missing or invalid; run {LOCAL_LAUNCHER} once.")
 
 
 def setup() -> None:
@@ -83,7 +85,7 @@ def setup() -> None:
     print(" Hermes Uplink ready on this machine.")
     print(f" URL :  http://127.0.0.1:{port} (local browser only)")
     print(f" Pass:  {passphrase}   (type on connect)")
-    print(" For phone access:  run launch_internet.bat for an HTTPS URL")
+    print(f" For phone access:  run {INTERNET_LAUNCHER} for an HTTPS URL")
     print("=" * 60)
     print()
 

@@ -17,7 +17,7 @@ flowchart TB
     subgraph WAN["Untrusted network"]
         EDGE["Browser<br/>index.html + app.js + app.css"]
     end
-    subgraph HOST["Windows host"]
+    subgraph HOST["Windows or Linux host"]
         TS["Tailscale Funnel<br/>*.ts.net :443 -> 127.0.0.1:8787"]
         PROXY["proxy.py :8787<br/>passphrase gate, static assets,<br/>Bearer injection, SSE relay"]
         CLI["hermes chat --resume … --format stream-json<br/>(turns into non-API sessions)"]
@@ -43,6 +43,8 @@ flowchart TB
 | [launch_local.bat](launch_local.bat) | Runs setup then the proxy in the foreground; `install` / `start` / `stop` / `status` manage login auto-start |
 | [launch_internet.bat](launch_internet.bat) | Wrapper for `internet_access.py` |
 | [windows/](windows/) | `autostart.vbs` (headless start at login) and `service.ps1` (PID-checked stop/status) |
+| [launch_local.sh](launch_local.sh) | Linux counterpart of `launch_local.bat`: same commands, backed by the `hermes-uplink` systemd user unit it writes (systemd supervises the process, so no PID check is needed) |
+| [launch_internet.sh](launch_internet.sh) | Linux wrapper for `internet_access.py` |
 
 `sw.js` exists mainly to make the app installable: it caches only the manifest, itself, and `marked`, never `index.html`, `app.js` or API calls.
 
@@ -102,7 +104,7 @@ Because of the CSP, UI code must not use inline `<script>`, inline `style=""` at
 
 ## Funnel lifecycle
 
-`launch_internet.bat start` calls `internet_access.py start`, which: ensures the local proxy is healthy (starting `launch_local.bat` if not), loads the passphrase, ensures Tailscale is signed in (opening the consent URL it prints), reads `tailscale funnel status --json`, and either accepts the existing Uplink route, fails closed on a foreign route, or runs `tailscale funnel --bg --yes --https=443 http://127.0.0.1:<port>` and re-verifies. `status` and `cleanup` use the same ownership check.
+`launch_internet.bat start` (or `./launch_internet.sh start`) calls `internet_access.py start`, which: ensures the local proxy is healthy (if not, opening `launch_local.bat` in a new console on Windows, or running `launch_local.sh start` in the current terminal on Linux), loads the passphrase, ensures Tailscale is signed in (opening the consent URL it prints), reads `tailscale funnel status --json`, and either accepts the existing Uplink route, fails closed on a foreign route, or runs `tailscale funnel --bg --yes --https=443 http://127.0.0.1:<port>` and re-verifies. `status` and `cleanup` use the same ownership check.
 
 ## Operations
 
@@ -119,6 +121,8 @@ Text assets are hashed and served with LF line endings, so a CRLF checkout does 
 ```powershell
 curl -s http://127.0.0.1:8642/health                       # gateway
 curl -s -i http://127.0.0.1:8787/api/sessions              # expect 401
-powershell -NoProfile -File .\windows\service.ps1 -Action status -Port 8787
+powershell -NoProfile -File .\windows\service.ps1 -Action status -Port 8787   # Linux: ./launch_local.sh status
 python internet_access.py status
 ```
+
+On Linux, `tailscaled` accepts configuration changes only from root or its operator, so Funnel setup needs `sudo tailscale set --operator=$USER` once; `TailscaleCommandError` appends that hint to an access-denied failure. CI runs the unit tests on Windows and Ubuntu and lints the shell launchers with shellcheck.

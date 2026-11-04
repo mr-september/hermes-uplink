@@ -22,6 +22,10 @@ PASS_FILE = ".uplink-pass.txt"
 KEY_PATTERN = re.compile(r"[A-Za-z0-9_-]{32}")
 PASS_PATTERN = re.compile(r"[A-Za-z0-9]{20,}")
 
+# Host entry points, also named in user-facing messages: .bat on Windows, .sh on Linux.
+LOCAL_LAUNCHER = "launch_local.bat" if os.name == "nt" else "launch_local.sh"
+INTERNET_LAUNCHER = "launch_internet.bat" if os.name == "nt" else "launch_internet.sh"
+
 
 class SettingsError(RuntimeError):
     """A user-actionable configuration problem."""
