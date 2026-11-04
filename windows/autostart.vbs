@@ -1,5 +1,6 @@
 ' hermes-uplink autostart: runs the proxy headless (no console window) at login.
-' Started by the Startup-folder stub that "launch_local.bat install" writes.
+' Started at login by the Startup-folder stub that "launch_local.bat install"
+' writes, and directly by "launch_local.bat start".
 ' The proxy binds loopback only; remote access goes through launch_internet.bat.
 
 Option Explicit

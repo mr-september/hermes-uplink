@@ -55,7 +55,7 @@ goto svc_%1
 :svc_install
 echo [*] Installing auto-start on login (Startup folder, headless via pythonw)...
 echo CreateObject("WScript.Shell").Run "wscript.exe ""%~dp0windows\autostart.vbs""", 0, False > "%LINK%"
-if exist "%LINK%" (echo [+] Installed. Starts on next logon. Run: launch_local.bat start) else echo [!] Failed to write to the Startup folder.
+if exist "%LINK%" (echo [+] Installed. Starts on next logon; run "launch_local.bat start" to start it now.) else echo [!] Failed to write to the Startup folder.
 goto :eof
 
 :svc_uninstall
@@ -63,7 +63,7 @@ if exist "%LINK%" (del /f "%LINK%" && echo [+] Removed auto-start.) else echo [!
 goto :eof
 
 :svc_start
-if exist "%LINK%" (wscript "%LINK%" && echo [+] Started headless.) else echo [!] Run 'launch_local.bat install' first.
+wscript "%~dp0windows\autostart.vbs" && echo [+] Started headless.
 goto :eof
 
 :svc_stop
