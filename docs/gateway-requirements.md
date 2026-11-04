@@ -14,11 +14,11 @@ Uplink talks to the Hermes API server (the gateway's REST + SSE surface). Core c
 | Skills and toolsets panel | `GET /v1/skills`, `GET /v1/toolsets` |
 | Mark read | `PATCH /api/sessions/{id}` with `{"unread": false}` |
 
-## Core blocker on current stock gateways (2026-11-02)
+## Sessions the API server does not own
 
-On the NousResearch/hermes-agent `main` line as of the 2026-11-01 lock (upstream `9bba78ef`), sending to a **pre-existing session** can be refused before the turn starts: the stream-door admission in `gateway/session_api_turn.py` (`admit_api_steps`) refuses any target whose `sessions.source` is not `api_server` or `bot_room`, while gateways that stamp their local sessions with their own labels (`local`, `desktop`) never store `api_server` for sessions created outside `POST /api/sessions`. The client then sees an immediate SSE `error` frame carrying `permission_denied`, the message is never admitted, and the stream closes — every session created by the desktop app, CLI, or a messaging surface becomes read-only in Uplink. Sessions created via `POST /api/sessions` (source `api_server`) work normally, so brand-new Uplink chats still send. This is a total blocker for continuing existing sessions, not a degrade.
+The API server admits turns only into sessions it created (`source` `api_server` or `bot_room`). A send to `/api/sessions/{id}/chat/stream` for a session created by the desktop app, CLI, TUI, or a messaging platform is refused with an SSE `error` frame carrying `permission_denied` (refusals come from the source check in `admit_api_steps` and the live-session and route checks in `bind_api_steps`). This is upstream's one-owner-per-conversation design, not a defect, and it should not be patched open: getting past those checks would rebind the conversation's route to the API server and take it away from its owner.
 
-Fix on the gateway side: admit local surfaces at **both** foreign-source gates — the `admit_api_steps` tuple and the storage-source binding checks in `gateway/session_api.py` — see [patching-hermes.md](patching-hermes.md) §3. Uplink itself needs no change; older gateway builds are not known to be affected.
+Uplink sends those turns through the Hermes CLI instead (`hermes chat --resume <id> --oneshot --query-file - --format stream-json`, with `hermes --print-runtime-command` to locate the interpreter for Stop); see ARCHITECTURE.md, Streaming. That needs the `hermes` launcher on the proxy's PATH (or `HERMES_CLI`) from a release that has both commands. Clarify cards are not available on this path.
 
 ## Optional features
 
