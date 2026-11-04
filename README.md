@@ -188,8 +188,8 @@ The repository is small and has no build step:
 
 Run the local unit tests with:
 
-```powershell
-python -m unittest discover -s tests -v
+```sh
+python -m unittest discover -s tests -v    # python3 on Linux
 ```
 
 After editing a pinned file in `web/` (`index.html`, `app.js`, `app.css`, `sw.js`, `vendor/marked.umd.js`), run `python proxy.py --update-hashes`; the proxy refuses to start while the digests in `web/pinned-hashes.json` are stale.
@@ -201,7 +201,8 @@ Before release, perform a live acceptance test from an external network:
 - open the Funnel URL without authentication and confirm rejection;
 - authenticate and load sessions;
 - complete an SSE-streamed turn;
-- restart Tailscale and reboot the desktop;
+- send a turn into a session created by the desktop app or CLI, and stop it;
+- restart Tailscale and reboot the host (on Linux with lingering enabled, confirm the proxy service returns without anyone logging in);
 - confirm the URL is unchanged and the route resumes;
 - disable the route and confirm local access remains functional; and
 - verify that an unrelated existing Tailscale route is never overwritten.
