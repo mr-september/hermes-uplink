@@ -9,14 +9,16 @@ title Hermes Uplink - Internet Access
 
 if not defined HERMES_PORT set "HERMES_PORT=8787"
 
-where python >nul 2>&1
-if errorlevel 1 (
-  echo [!] Python 3 is not installed or not available in PATH.
+REM  Same pinned interpreter as launch_local.bat (see comment there).
+set "PYEXE=C:\Users\Larry\AppData\Roaming\uv\python\cpython-3.14-windows-x86_64-none\python.exe"
+
+if not exist "%PYEXE%" (
+  echo [!] Pinned Python 3.14 not found at "%PYEXE%". Update PYEXE in this file.
   pause
   exit /b 1
 )
 
-python -m uplink.funnel %*
+"%PYEXE%" -m uplink.funnel %*
 set "EXIT_CODE=%ERRORLEVEL%"
 if not "%EXIT_CODE%"=="0" pause
 if not "%~1"=="" if "%EXIT_CODE%"=="0" (

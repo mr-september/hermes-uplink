@@ -25,24 +25,29 @@ title Hermes Uplink - Local Proxy
 
 if not defined HERMES_PORT set "HERMES_PORT=8787"
 
+REM  Pinned interpreter (stdlib-only app; Python 3.14). The bare "python" alias
+REM  resolved by PATH accident (it reached 3.10 via the py-manager shell), which
+REM  the 2026-10-31 interpreter audit flagged; pin the uv-managed 3.14 base whose
+REM  unversioned directory survives uv upgrades.
+set "PYEXE=C:\Users\Larry\AppData\Roaming\uv\python\cpython-3.14-windows-x86_64-none\python.exe"
+
 if /i "%~1"=="install"   call :svc install & goto :eof
 if /i "%~1"=="uninstall" call :svc uninstall & goto :eof
 if /i "%~1"=="start"     call :svc start & goto :eof
 if /i "%~1"=="stop"      call :svc stop & goto :eof
 if /i "%~1"=="status"    call :svc status & goto :eof
 
-where python >nul 2>&1
-if errorlevel 1 (
-  echo [!] Python 3 is not installed or not in your PATH. Please install it to continue.
+if not exist "%PYEXE%" (
+  echo [!] Pinned Python 3.14 not found at "%PYEXE%". Update PYEXE in this file.
   pause
   exit /b 1
 )
-python -m uplink.configure
+"%PYEXE%" -m uplink.configure
 if errorlevel 1 (
   pause
   exit /b 1
 )
-python -m uplink.server --port "%HERMES_PORT%"
+"%PYEXE%" -m uplink.server --port "%HERMES_PORT%"
 if errorlevel 1 echo [!] Hermes Uplink stopped with an error.
 pause
 goto :eof
