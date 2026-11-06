@@ -11,21 +11,21 @@ Set FSO = CreateObject("Scripting.FileSystemObject")
 ' This script lives in <repo>\windows; the proxy and credentials are in <repo>.
 WShell.CurrentDirectory = FSO.GetParentFolderName(FSO.GetParentFolderName(WScript.ScriptFullName))
 
-' Pinned interpreter: uv-managed Python 3.14 base (unversioned directory name
-' survives uv upgrades). Bare pythonw.exe was a PATH accident -- see the
-' comment in launch_local.bat.
-Dim PYWEXE
-PYWEXE = "C:\Users\Larry\AppData\Roaming\uv\python\cpython-3.14-windows-x86_64-none\pythonw.exe"
-If Not FSO.FileExists(PYWEXE) Then
-  MsgBox "Pinned Python 3.14 not found at " & PYWEXE & ". Update PYWEXE in this script.", 48, "Hermes Uplink Error"
-  WScript.Quit 1
+' Interpreter: pythonw.exe beside UPLINK_PYTHON when that is set (see
+' launch_local.bat), else pythonw.exe on PATH.
+Dim PYWEXE, chosen
+PYWEXE = "pythonw.exe"
+chosen = WShell.Environment("PROCESS")("UPLINK_PYTHON")
+If chosen <> "" Then
+  PYWEXE = FSO.BuildPath(FSO.GetParentFolderName(chosen), "pythonw.exe")
+  If Not FSO.FileExists(PYWEXE) Then PYWEXE = chosen   ' the window is hidden either way
 End If
 
 ' uplink.configure --check validates HERMES_PORT and the credential files.
 On Error Resume Next
 rc = WShell.Run("""" & PYWEXE & """ -m uplink.configure --check", 0, True)   ' 0 = hidden window, True = wait
 If Err.Number <> 0 Then
-  MsgBox "Failed to run " & PYWEXE & ". Update PYWEXE in this script, then retry.", 48, "Hermes Uplink Error"
+  MsgBox "Could not run " & PYWEXE & ". Install Python, add it to PATH, or set UPLINK_PYTHON, then retry.", 48, "Hermes Uplink Error"
   WScript.Quit 1
 End If
 On Error GoTo 0

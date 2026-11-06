@@ -9,14 +9,17 @@ stops a turn (the owner keeps running it).
 Usage: interrupt_helper.py SESSION_ID    -> prints one JSON line {"ok": bool, "reason": str}; exit 0 when ok.
 """
 import asyncio
+import contextlib
 import json
 import sys
 
 
 async def _interrupt(session_id):
-    from hermes_cli.gateway_client import connect_gateway, outside_restart_wait
-    with outside_restart_wait():
-        async with connect_gateway() as client:
+    from hermes_cli import gateway_client
+    # outside_restart_wait (0.22.6+) keeps the attach away from an owner in a restart's after-turn wait;
+    # 0.22.1-0.22.5 have the same session.resume / session.interrupt protocol without it.
+    with getattr(gateway_client, "outside_restart_wait", contextlib.nullcontext)():
+        async with gateway_client.connect_gateway() as client:
             snapshot = await client.rpc("session.resume", session_id=session_id)
             await client.rpc("session.interrupt", session_id=session_id,
                              execution_generation=snapshot.get("execution_generation", 0))

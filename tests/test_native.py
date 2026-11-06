@@ -1,8 +1,10 @@
+import contextlib
 import http.client
 import json
 import subprocess
 import sys
 import threading
+import types
 import unittest
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,7 +12,7 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from uplink import native, server  # noqa: E402
+from uplink import interrupt_helper, native, server  # noqa: E402
 
 # What `hermes chat --format stream-json` printed for a real turn (fields as observed on 2026-11-04).
 CLI_EVENTS = [
@@ -69,13 +71,50 @@ class TranslatorTests(unittest.TestCase):
             runtime.helper_command("x.py")
 
 
+def sse(event, data):
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n".encode()
+
+
+# What a gateway from 0.22.1 on streams for a turn into a session it does not own (the admission refusal is raised
+# inside the turn, after the stream has started).
+REFUSAL = [sse("run.started", {"run_id": "run_rest"}), sse("message.started", {"run_id": "run_rest"}),
+           sse("error", {"message": "permission_denied", "run_id": "run_rest"}), sse("done", {"run_id": "run_rest"})]
+ADMITTED = [sse("run.started", {"run_id": "run_rest"}), sse("assistant.delta", {"delta": "via rest"}),
+            sse("run.completed", {"run_id": "run_rest"}), sse("done", {})]
+
+
+class InterruptHelperTests(unittest.TestCase):
+    def test_interrupt_works_without_outside_restart_wait(self):
+        """0.22.1-0.22.5 have connect_gateway and the interrupt RPCs but not outside_restart_wait."""
+        calls = []
+
+        class Client:
+            async def rpc(self, method, **params):
+                calls.append((method, params))
+                return {"execution_generation": 7}
+
+        @contextlib.asynccontextmanager
+        async def connect_gateway():
+            yield Client()
+
+        package = types.ModuleType("hermes_cli")
+        package.gateway_client = types.SimpleNamespace(connect_gateway=connect_gateway)
+        with mock.patch.dict(sys.modules, {"hermes_cli": package, "hermes_cli.gateway_client": package.gateway_client}), \
+                mock.patch("builtins.print"):
+            self.assertEqual(interrupt_helper.main(["helper", "sid"]), 0)
+        self.assertEqual(calls, [("session.resume", {"session_id": "sid"}),
+                                 ("session.interrupt", {"session_id": "sid", "execution_generation": 7})])
+
+
 class Upstream(BaseHTTPRequestHandler):
     posted = []
+    # desk1: refused (0.22.1+); old1: an older gateway admits it; api1: refused although the API server owns it.
+    sources = {"desk1": "desktop", "old1": "desktop", "api1": "api_server"}
 
     def do_GET(self):
-        sources = {"/api/sessions/desk1": "desktop", "/api/sessions/api1": "api_server"}
-        body = json.dumps({"session": {"source": sources[self.path]}} if self.path in sources else {}).encode()
-        self.send_response(200 if self.path in sources else 404)
+        source = Upstream.sources.get(self.path.rsplit("/", 1)[-1])
+        body = json.dumps({"session": {"source": source}} if source else {}).encode()
+        self.send_response(200 if source else 404)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
@@ -87,7 +126,9 @@ class Upstream(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.end_headers()
-        self.wfile.write(b"event: run.completed\ndata: {}\n\n")
+        for frame in ADMITTED if "/old1/" in self.path else REFUSAL:
+            self.wfile.write(frame)
+            self.wfile.flush()
 
     def log_message(self, *_args):
         pass
@@ -148,19 +189,31 @@ class NativeRoutingTests(unittest.TestCase):
                             body=json.dumps({"input": "hi ✓", "client_turn_id": "t"}),
                             headers={"Cookie": cookie, "Content-Type": "application/json"})
 
-    def test_desktop_session_turn_runs_through_the_cli_and_api_session_through_rest(self):
-        cookie = self.cookie()
-        status, body = self.send("desk1", cookie)
+    def test_refused_desktop_session_turn_continues_through_the_cli(self):
+        status, body = self.send("desk1", self.cookie())
         self.assertEqual(status, 200)
         produced = frames(body)
+        # The refusal and its done are not relayed; the CLI turn's own run.started rebinds the client's run id.
         self.assertEqual([name for name, _ in produced],
-                         ["run.started", "assistant.delta", "assistant.completed", "run.completed", "done"])
-        self.assertEqual(produced[1][1]["delta"], "echo:hi ✓")   # prompt crossed stdin as UTF-8
-        self.assertEqual(Upstream.posted, [])
+                         ["run.started", "message.started", "run.started", "assistant.delta", "assistant.completed",
+                          "run.completed", "done"])
+        self.assertTrue(produced[2][1]["run_id"].startswith(native.RUN_PREFIX))
+        self.assertEqual(produced[3][1]["delta"], "echo:hi ✓")   # prompt crossed stdin as UTF-8
+        self.assertEqual(Upstream.posted, ["/api/sessions/desk1/chat/stream"])
 
-        status, body = self.send("api1", cookie)
+    def test_gateway_that_admits_a_desktop_session_streams_it_over_rest(self):
+        with mock.patch.object(native, "spawn_turn") as spawn:
+            status, body = self.send("old1", self.cookie())
         self.assertEqual(status, 200)
-        self.assertEqual(Upstream.posted, ["/api/sessions/api1/chat/stream"])
+        self.assertEqual(body, b"".join(ADMITTED))
+        spawn.assert_not_called()
+
+    def test_refusal_of_an_api_session_is_relayed_not_rerouted(self):
+        with mock.patch.object(native, "spawn_turn") as spawn:
+            status, body = self.send("api1", self.cookie())
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"".join(REFUSAL))
+        spawn.assert_not_called()
 
     def test_stop_of_a_native_run_interrupts_its_session(self):
         cookie = self.cookie()

@@ -13,6 +13,8 @@ REM
 REM  Env (optional):
 REM    HERMES_PORT      port to bind      (default 8787)
 REM    HERMES_UPSTREAM  API Server URL    (default http://127.0.0.1:8642)
+REM    UPLINK_PYTHON    python.exe to run (default: python on PATH); the
+REM                     background service uses pythonw.exe beside it
 REM
 REM  Setup (credentials, Hermes configuration, gateway restart) lives in
 REM  uplink\configure.py. "install" drops a launcher into the per-user Startup
@@ -25,20 +27,17 @@ title Hermes Uplink - Local Proxy
 
 if not defined HERMES_PORT set "HERMES_PORT=8787"
 
-REM  Pinned interpreter (stdlib-only app; Python 3.14). The bare "python" alias
-REM  resolved by PATH accident (it reached 3.10 via the py-manager shell), which
-REM  the 2026-10-31 interpreter audit flagged; pin the uv-managed 3.14 base whose
-REM  unversioned directory survives uv upgrades.
-set "PYEXE=C:\Users\Larry\AppData\Roaming\uv\python\cpython-3.14-windows-x86_64-none\python.exe"
-
 if /i "%~1"=="install"   call :svc install & goto :eof
 if /i "%~1"=="uninstall" call :svc uninstall & goto :eof
 if /i "%~1"=="start"     call :svc start & goto :eof
 if /i "%~1"=="stop"      call :svc stop & goto :eof
 if /i "%~1"=="status"    call :svc status & goto :eof
 
-if not exist "%PYEXE%" (
-  echo [!] Pinned Python 3.14 not found at "%PYEXE%". Update PYEXE in this file.
+set "PYEXE=python"
+if defined UPLINK_PYTHON set "PYEXE=%UPLINK_PYTHON%"
+"%PYEXE%" -c "" >nul 2>&1
+if errorlevel 1 (
+  echo [!] Python 3 was not found: install it, add it to PATH, or set UPLINK_PYTHON.
   pause
   exit /b 1
 )
