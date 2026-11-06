@@ -25,7 +25,7 @@ Uplink sends every turn to REST first and, on that refusal, continues it through
 | Feature | What the client uses | Without it | Stock |
 |---|---|---|---|
 | Unread badges | `unread` (boolean) on session list rows and on single-session get/patch responses | No unread badges; read-marking is a harmless no-op | The database computes `unread` and `PATCH` accepts it, but the REST responses do not return it. *Extension.* |
-| Context ring | `context_used` and `context_window` (`context_limit` and `occupancy_pct` also read) on session detail | Ring shows "unknown" | Not on the REST session payload. *Extension.* |
+| Context ring | `context_used` and `context_window` (`context_limit` also read) on session detail | Ring shows "unknown" | Not on the REST session payload. *Extension.* |
 | Interactive questions | `clarify` / `clarify.settled` / `clarify.intercept` SSE events; `POST …/clarify/respond`; `GET …/clarify/pending`; `client_capabilities` accepted on the chat request; `features.clarify` in `/v1/capabilities` | The agent's clarify call has no card to answer and waits for its timeout | The clarify core (single, multi-select, batch, locking) and its Telegram, Discord, Slack, TUI, and Desktop front-ends are stock; the REST/SSE adapter is not. *Extension.* |
 | Batched questions with partial saves | `POST …/clarify/lock`, `features.clarify_batch`, `batch`, and `locked` fields on the `clarify` event | Batches fall back to one submit with no server-side partial save | As above. *Extension.* |
 | Turn de-duplication | `Idempotency-Key` and `client_turn_id` on chat/stream | A retried send after a dropped connection can run twice | Not implemented for session streaming; the client already sends both. |
