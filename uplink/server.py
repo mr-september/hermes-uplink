@@ -3,7 +3,7 @@
 The browser authenticates once with the passphrase and gets an HttpOnly session cookie; API requests are then
 forwarded to the Hermes API server with the API key added here, so the key never reaches the browser. Remote
 HTTPS access terminates at Tailscale Funnel (uplink.funnel), which forwards to this process on localhost.
-Turns into sessions the API server does not own go through the Hermes CLI instead (uplink.native).
+Turns the API server refuses because it does not own the session go through the Hermes CLI instead (uplink.native).
 
     python -m uplink.server [--port N] [--upstream URL] [--hermes-cli PATH]
 """
@@ -64,6 +64,11 @@ CHAT_STREAM_RE = re.compile(r"^/api/sessions/([^/?]+)/chat/stream$")
 RUN_STOP_RE = re.compile(r"^/v1/runs/([^/?]+)/stop$")
 # Session ids reach a CLI argv: refuse anything argparse could read as an option.
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
+SSE_FRAME_END = re.compile(rb"\r?\n\r?\n")
+SSE_PING = b": ping\n\n"
+# A refusing gateway sends these, then ``error`` ``permission_denied``, before the turn produces anything.
+PRELUDE_EVENTS = frozenset({"run.started", "message.started"})
+REFUSAL_RE = re.compile(r"\bpermission_denied\b")
 CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 TEXT = "text/plain; charset=utf-8"
 JSON = "application/json"
@@ -87,6 +92,23 @@ def is_loopback_host(host):
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def sse_event(frame):
+    """(event name, data object or None) of one SSE frame; a comment-only frame has no event name."""
+    event, data = None, []
+    for line in re.split(r"\r\n|\r|\n", frame.decode("utf-8", "replace")):
+        if line.startswith("event:"):
+            event = line[6:].strip()
+        elif line.startswith("data:"):
+            data.append(line[6:] if line.startswith("data: ") else line[5:])
+    if event is None and data:
+        event = "message"
+    try:
+        payload = json.loads("\n".join(data)) if data else None
+    except ValueError:
+        payload = None
+    return event, payload if isinstance(payload, dict) else None
 
 
 def validate_upstream(url, allow_remote=False):
@@ -274,19 +296,61 @@ class Handler(BaseHTTPRequestHandler):
             self._forward(body)
 
     def _chat_stream(self, session_id):
-        """A turn: the API server's own sessions stream over REST; every other session goes through the
-        Hermes CLI (uplink.native), because the API server refuses turns into sessions it does not own."""
+        """A turn: always sent to the REST stream first. Gateways from 0.22.1 on refuse turns into sessions the API
+        server does not own; such a turn continues through the Hermes CLI (uplink.native) on the same response.
+        Older gateways admit every session, so the CLI is never needed there."""
         body = self._read_body(MAX_REQUEST_BODY)
-        if body is _REJECTED:
+        if body is not _REJECTED:
+            self._forward(body, lambda response: self._relay_turn(response, session_id, body))
+
+    def _relay_turn(self, response, session_id, body):
+        content_type = response.headers.get("Content-Type", "")
+        if "text/event-stream" not in content_type.lower():
+            self._relay(response)
             return
-        text = self._native_input(session_id, body)
+        self._start_response(response.status, content_type, None)
+        text = None
+        try:
+            text = self._relay_until_output(response, session_id, body)
+        except CLIENT_GONE:
+            LOGGER.debug("client disconnected during upstream stream")
+        except Exception:
+            LOGGER.exception("proxy stream interrupted")
         if text:
+            response.close()
             self._native_turn(session_id, text)
-        else:
-            self._forward(body)
+
+    def _relay_until_output(self, response, session_id, body):
+        """Relay frames as they arrive until the turn's first non-prelude frame, then the rest unparsed. Returns the
+        turn's text instead, without relaying the refusal, when the gateway refused the session at admission (that
+        happens before anything is committed, so nothing runs twice) and the CLI can carry the turn."""
+        chunks = self._chunks(response, True)
+        buffer = b""
+        for chunk in chunks:
+            if chunk is None:
+                self._write(SSE_PING)
+                continue
+            buffer += chunk
+            while end := SSE_FRAME_END.search(buffer):
+                frame, buffer = buffer[:end.end()], buffer[end.end():]
+                event, data = sse_event(frame)
+                if (event == "error" and data and REFUSAL_RE.search(str(data.get("message", "")))
+                        and (text := self._native_input(session_id, body))):
+                    LOGGER.info("gateway refused session %s at admission; sending the turn through the CLI", session_id)
+                    return text
+                self._write(frame)
+                if event is not None and event not in PRELUDE_EVENTS:
+                    if buffer:
+                        self._write(buffer)
+                    for rest in chunks:
+                        self._write(SSE_PING if rest is None else rest)
+                    return None
+        if buffer:
+            self._write(buffer)
+        return None
 
     def _native_input(self, session_id, body):
-        """The turn's text when it must go through the CLI, else None."""
+        """The turn's text when the CLI may carry it, else None."""
         if not (SESSION_ID_RE.match(session_id) and native.RUNTIME.available()):
             return None
         if not native.wants_native(self._session_source(session_id)):
@@ -314,7 +378,7 @@ class Handler(BaseHTTPRequestHandler):
             request.add_header("Authorization", "Bearer " + self.server.config.api_key)
         return request
 
-    def _forward(self, body):
+    def _forward(self, body, relay=None):
         """Send this request upstream and relay the response (or answer with the upstream's error)."""
         method = self.command
         data = body if body else (b"" if method in ("POST", "PUT", "PATCH") else None)
@@ -332,7 +396,7 @@ class Handler(BaseHTTPRequestHandler):
             self._text(502, "upstream unavailable")
             return
         with response:
-            self._relay(response)
+            (relay or self._relay)(response)
 
     def _relay(self, response):
         content_type = response.headers.get("Content-Type", "application/octet-stream")
@@ -350,6 +414,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _pump(self, response, is_event_stream):
         """Copy the upstream body to the client; on SSE, ping while upstream is quiet."""
+        for chunk in self._chunks(response, is_event_stream):
+            self._write(SSE_PING if chunk is None else chunk)
+
+    @staticmethod
+    def _chunks(response, is_event_stream):
+        """The upstream body in chunks as they arrive; on SSE, None for each keepalive interval of silence."""
         read = getattr(response, "read1", response.read)
         fileno = None
         if is_event_stream:
@@ -362,28 +432,34 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     ready, _, _ = select.select([fileno], [], [], SSE_KEEPALIVE_INTERVAL)
                 except (OSError, ValueError):
-                    break
+                    return
                 if not ready:
-                    self.wfile.write(b": ping\n\n")
-                    self.wfile.flush()
+                    yield None
                     continue
             chunk = read(65536 if is_event_stream else 4096)
             if not chunk:
-                break
-            self.wfile.write(chunk)
-            self.wfile.flush()
+                return
+            yield chunk
+
+    def _write(self, data):
+        self.wfile.write(data)
+        self.wfile.flush()
 
     # ---- turns through the Hermes CLI ----
 
     def _native_turn(self, session_id, text):
+        """Continue the open SSE response with the turn run through the CLI."""
         try:
             turn = native.Turn(session_id, text)
         except (native.NativeUnavailable, OSError) as error:
             LOGGER.error("native turn could not start: %s", error)
-            self._text(502, f"Hermes CLI unavailable: {error}")
+            try:
+                self._write(native.sse("error", {"message": f"Hermes CLI unavailable: {error}", "session_id": session_id})
+                            + native.sse("done", {"session_id": session_id}))
+            except CLIENT_GONE:
+                pass
             return
         LOGGER.info("native turn %s on session %s", turn.run_id, session_id)
-        self._start_response(200, "text/event-stream", None)
         with closing(turn.frames(SSE_KEEPALIVE_INTERVAL)) as frames:
             try:
                 for chunk in frames:
@@ -536,7 +612,8 @@ def main(argv=None):
         return 1
     native.RUNTIME.configure(args.hermes_cli or None)
     if not native.RUNTIME.available():
-        LOGGER.warning("hermes command not found: sessions created outside the API server stay read-only")
+        LOGGER.warning("hermes command not found: sessions created outside the API server stay read-only "
+                       "on gateways that refuse them (0.22.1 and later)")
     enable_console_selection()
     try:
         PID_FILE.write_text(str(os.getpid()), encoding="ascii")

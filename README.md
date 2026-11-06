@@ -86,7 +86,7 @@ flowchart LR
 ## Prerequisites
 
 - **Windows 10 or later**, or **Linux**. On Linux, background running and auto-start use a systemd user service; without systemd, run the proxy in the foreground.
-- **Python 3** available in PATH (`python3` on Linux).
+- **Python 3** available in PATH (`python3` on Linux). On Windows, set `UPLINK_PYTHON` to a `python.exe` to use a specific interpreter instead.
 - **Hermes CLI** available in PATH.
 - **Tailscale** installed and signed in on the host, from the [Windows](https://tailscale.com/download/windows) or [Linux](https://tailscale.com/download/linux) download. On Linux, Uplink runs as your user, so allow that user to change Tailscale settings once with `sudo tailscale set --operator=$USER`; the launcher prints this command if Tailscale refuses.
 - **No Python package installation is required.** The proxy and internet-access controller use the Python standard library.
@@ -163,7 +163,7 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 - **File Uploads:** File and image uploads are currently unsupported.
 - **Single shared credential:** The passphrase grants full access; there are no per-user accounts or roles.
 - **Edge search:** Session filtering covers title and source, not message content.
-- **Sessions created outside Uplink:** the Hermes API server only runs turns in sessions it created, so Uplink sends into desktop, CLI, TUI, and messaging sessions through the `hermes` command on the host, which must be on the proxy's PATH (or set `HERMES_CLI`). Those turns show no interactive question cards; details in [docs/gateway-requirements.md](docs/gateway-requirements.md).
+- **Sessions created outside Uplink:** from Hermes 0.22.1 the API server only runs turns in sessions it created, so Uplink sends into desktop, CLI, TUI, and messaging sessions through the `hermes` command on the host, which must be on the proxy's PATH (or set `HERMES_CLI`). Those turns show no interactive question cards; details in [docs/gateway-requirements.md](docs/gateway-requirements.md).
 
 ## Documentation
 
