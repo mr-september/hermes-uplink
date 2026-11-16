@@ -97,7 +97,7 @@ export async function streamTurn(text, sessionId, opts={}){
   const turnId = opts.turnId || generateUUID();
   const S = {sid: sessionId, abort: new AbortController(), runId: null, lastFrameAt: Date.now(), running: true,
              holder: document.createElement("div"), bubble: null, userBubble: addMsg("user", text), intercepted: false,
-             body: null, raw: "", gotText: false, gotTools: false};
+             body: null, raw: "", gotText: false, gotTools: false, accepted: false, lostConnection: false};
   streams.set(sessionId, S);
   state.lastClarifyProbeAt = 0;
   updateRingState();
@@ -141,10 +141,23 @@ export async function streamTurn(text, sessionId, opts={}){
     }
     if(buf.trim()) handleFrame(S, buf);
   }catch(e){
-    // The stream failed before delivery: keep the text as a draft (with its turn id) and offer it again.
-    saveDraft(sessionId, text, turnId);
-    restoreToComposer(sessionId, text);
-    addStreamNote(S, e && e.name === "AbortError" ? "[stopped]" : "[error] " + (e && e.message ? e.message : e));
+    if(e && e.name === "AbortError"){
+      // The user stopped it (or stopAll on page hide): keep today's behaviour — note, draft, composer.
+      saveDraft(sessionId, text, turnId);
+      restoreToComposer(sessionId, text);
+      addStreamNote(S, "[stopped]");
+    }else if(S.accepted){
+      // The gateway had the turn (frames were flowing) and only the connection died — a phone that backgrounds
+      // or sleeps drops its SSE mid-turn. The run keeps going server-side; the text is not lost, so never offer
+      // the draft again: the gateway does not de-duplicate streamed turns and a resend would run it twice.
+      S.lostConnection = true;
+      addStreamNote(S, "[connection lost] The agent is still working on it. The reply will appear when this session refreshes.");
+    }else{
+      // The stream failed before delivery: keep the text as a draft (with its turn id) and offer it again.
+      saveDraft(sessionId, text, turnId);
+      restoreToComposer(sessionId, text);
+      addStreamNote(S, "[error] " + (e && e.message ? e.message : e));
+    }
   }finally{
     clearInterval(watchdog);
     S.running = false;
@@ -154,9 +167,10 @@ export async function streamTurn(text, sessionId, opts={}){
     if(S.bubble.children.length <= 1) S.bubble.remove();
     if(S.intercepted) S.userBubble.remove();
     if(S.sid === state.activeId){
-      // Finished in the session being viewed: keep what is on screen.
+      // Finished in the session being viewed: keep what is on screen — unless the turn is only unfinished
+      // business (connection lost): then the thread stays refreshable, so the next refresh paints the reply.
       streams.delete(sessionId);
-      if($("thread").childElementCount) localThread.add(sessionId);
+      if($("thread").childElementCount && !S.lostConnection) localThread.add(sessionId);
       updateRingState();
       await syncAfterTurn(sessionId);
       if(state.probeClarifyAfterTurn){
@@ -254,6 +268,7 @@ function handleFrame(S, frame){
   // nothing is dropped and nothing leaks into the visible thread.
   const fg = S.sid === state.activeId;
   const bubble = S.bubble;
+  S.accepted = true;   // the gateway emitted a real frame: the turn exists server-side (run.started carries the text)
   S.lastFrameAt = Date.now();
   let event = "message", data = "";
   for(const line of frame.split(/\r?\n/)){
