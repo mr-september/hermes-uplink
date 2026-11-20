@@ -46,7 +46,7 @@ Python runs as modules of the `uplink` package from the repository root (`python
 | [web/pinned-hashes.json](web/pinned-hashes.json) | SHA-256 digests of every `.html`, `.js`, and `.css` file the proxy serves |
 | [launch_local.bat](launch_local.bat), [launch_local.sh](launch_local.sh) | Setup then the proxy in the foreground; `install` / `start` / `stop` / `status` / `uninstall` manage the background proxy (Windows Startup folder; Linux `hermes-uplink` systemd user unit, which supervises the process) |
 | [launch_internet.bat](launch_internet.bat), [launch_internet.sh](launch_internet.sh) | Wrappers for `python -m uplink.funnel` |
-| [windows/](windows/) | `autostart.vbs` (headless start at login) and `service.ps1` (PID-checked stop/status) |
+| [windows/](windows/) | `autostart.vbs` (headless start at login) and `service.ps1` (PID-checked start/stop/status; start verifies health instead of reporting on faith) |
 
 The proxy takes the API key and passphrase from the `HERMES_API_KEY` / `UPLINK_PASSPHRASE` environment variables, falling back to the git-ignored `.uplink-key.txt` / `.uplink-pass.txt` that `uplink.configure` creates. Credential formats are validated in one place, `uplink/settings.py`.
 
@@ -90,7 +90,7 @@ sequenceDiagram
     G-->>B: 200 (relayed)
 ```
 
-Passphrase failures are limited to 10 per 60 s per client address (the correct passphrase is never locked out). Sessions last 12 h, at most 256 at a time. At most 32 proxy requests run concurrently (excess get `503`) and 128 connections (excess are dropped).
+Passphrase failures are limited to 10 per 60 s per client — the TCP peer, or behind the Funnel (where every browser arrives from loopback) the first X-Forwarded-For hop (the correct passphrase is never locked out). Sessions last 12 h, at most 256 at a time. At most 32 proxy requests run concurrently (excess get `503`) and 128 connections (excess are dropped).
 
 ## Streaming
 
@@ -149,4 +149,4 @@ powershell -NoProfile -File .\windows\service.ps1 -Action status -Port 8787   # 
 python -m uplink.funnel status
 ```
 
-CI runs the unit tests on Windows and Ubuntu and lints the shell launchers with shellcheck.
+CI runs the unit tests on Windows and Ubuntu against Python 3.11 (the floor) and 3.14 (the interpreter the service runs), and lints the shell launchers with shellcheck. The browser test uses the Chrome the runners ship; locally it skips when no Chrome/Chromium is present (set `CHROME_BIN` to point at one).

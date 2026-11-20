@@ -90,9 +90,9 @@ class ProxyIntegrationTests(unittest.TestCase):
         connection.close()
         return response.status, response_headers, payload
 
-    def login(self, passphrase=PASSPHRASE):
-        return self.request("POST", "/__auth", body=json.dumps({"passphrase": passphrase}),
-                            headers={"Content-Type": "application/json"})
+    def login(self, passphrase=PASSPHRASE, extra_headers=None):
+        headers = {"Content-Type": "application/json", **(extra_headers or {})}
+        return self.request("POST", "/__auth", body=json.dumps({"passphrase": passphrase}), headers=headers)
 
     def authenticate(self):
         status, headers, _ = self.login()
@@ -118,6 +118,19 @@ class ProxyIntegrationTests(unittest.TestCase):
             status, _, _ = self.login("wrong-passphrase")
         self.assertEqual(status, 429)
         self.assertEqual(self.login()[0], 204)
+
+    def test_attempt_limit_is_per_forwarded_client_behind_the_funnel(self):
+        # Every Funnel browser connects from loopback; the first X-Forwarded-For hop keeps them in
+        # separate buckets, and a request without the header stays one loopback client.
+        for _ in range(auth.ATTEMPT_LIMIT + 1):
+            status, _, _ = self.login("wrong", extra_headers={"X-Forwarded-For": "203.0.113.1, 127.0.0.1"})
+        self.assertEqual(status, 429)
+        self.assertEqual(self.login("wrong", extra_headers={"X-Forwarded-For": "203.0.113.2"})[0], 401)
+        self.assertEqual(self.login("wrong-passphrase")[0], 401)          # no header: its own loopback bucket
+        for _ in range(auth.ATTEMPT_LIMIT):                                # ...which its repeated failures fill
+            status, _, _ = self.login("wrong-passphrase")
+        self.assertEqual(status, 429)
+        self.assertEqual(self.login(PASSPHRASE, extra_headers={"X-Forwarded-For": "203.0.113.1"})[0], 204)
 
     def test_non_ascii_passphrase_attempt_is_refused_not_an_error(self):
         self.assertEqual(self.login("pässphrase")[0], 401)

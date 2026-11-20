@@ -220,6 +220,17 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- passphrase gate ----
 
+    def _client_key(self):
+        """The rate-limiter's client identity. Behind the Funnel every browser connects from loopback,
+        so the first X-Forwarded-For hop is used when the TCP peer is loopback (only a host that already
+        has loopback access could forge that header); otherwise the TCP peer itself."""
+        peer = self.client_address[0] if self.client_address else "unknown"
+        if is_loopback_host(peer):
+            first_hop = self.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+            if first_hop:
+                return first_hop
+        return peer
+
     def _login(self):
         if self.command != "POST":
             self._text(405, "method not allowed", {"Allow": "POST"})
@@ -237,7 +248,7 @@ class Handler(BaseHTTPRequestHandler):
             self._text(400, "invalid authentication request")
             return
         offered = payload.get("passphrase") if isinstance(payload, dict) else None
-        client = self.client_address[0] if self.client_address else "unknown"
+        client = self._client_key()
         if not isinstance(offered, str) or not secrets.compare_digest(offered.encode(), passphrase.encode()):
             retry_after = self.server.attempts.record_failure(client)
             if retry_after:

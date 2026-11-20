@@ -194,7 +194,7 @@ python -m unittest discover -s tests -v    # python3 on Linux
 
 After editing any `.html`, `.js`, or `.css` file in `web/`, run `python -m uplink.assets --update`; the proxy refuses to start while the digests in `web/pinned-hashes.json` are stale.
 
-The server tests cover authentication, cookie sessions, API-key injection, SSE responses, malformed requests, pinned-asset integrity and serving, and loopback validation. Internet-access tests use a fake Tailscale command runner and do not require a Tailscale account.
+The server tests cover authentication, cookie sessions, API-key injection, SSE responses, malformed requests, pinned-asset integrity and serving, and loopback validation. Internet-access tests use a fake Tailscale command runner and do not require a Tailscale account. A browser test (`tests/test_client_clarify.py`) drives the real clarify cards in a real Chrome/Chromium against the real client modules with a recording fetch stub; it skips when no browser is found — set `CHROME_BIN` to point at one.
 
 Before release, perform a live acceptance test from an external network:
 
