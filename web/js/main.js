@@ -8,7 +8,7 @@ import {copyActiveId, lastSessionRows, loadSessions, newSession, refresh, render
 import {state} from "./state.js";
 import {stopAll} from "./stream.js";
 import {handleMsgAction} from "./thread.js";
-import {$, showToast} from "./util.js";
+import {$, copyText, showToast} from "./util.js";
 
 // Entry point: wires the page's controls, then shows the passphrase gate or boots the app.
 
@@ -59,6 +59,15 @@ $("offlineRetryBtn").onclick = ()=>{
 };
 // Message actions on user bubbles (hover buttons on desktop, always shown on touch).
 $("thread").addEventListener("click", e=>{
+  const cp = e.target.closest(".code-copy");
+  if(cp){
+    const pre = cp.parentElement.querySelector("pre");
+    const src = pre && (pre.querySelector("code") || pre);
+    if(src && src.textContent) copyText(src.textContent, ()=>{
+      cp.textContent = "✓"; setTimeout(()=>{ cp.textContent = "⧉"; }, 1200);
+    });
+    return;
+  }
   const b = e.target.closest(".msgActions button");
   if(!b) return;
   const bubble = b.closest(".msg");

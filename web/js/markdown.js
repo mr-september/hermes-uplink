@@ -145,4 +145,23 @@ export function setCleanBody(el, cleanText){
     return part.content.replace(/<(?=[a-zA-Z\/!\?])/gi, "&lt;");
   });
   el.innerHTML = secureHtml(renderMarkdown(safeParts.join("")));
+  decorateCodeBlocks(el);
+}
+// Copy button on every code block (the desktop GUI's copy-all counterpart). The button lives on a wrapper
+// outside the <pre>, so it never scrolls away with a long block and adds no characters to the copied text.
+export function decorateCodeBlocks(el){
+  for(const pre of el.querySelectorAll("pre")){
+    if(pre.parentElement.classList.contains("code-wrap")) continue;
+    const wrap = document.createElement("div");
+    wrap.className = "code-wrap";
+    pre.replaceWith(wrap);
+    wrap.appendChild(pre);
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "code-copy";
+    b.textContent = "⧉";
+    b.title = "Copy";
+    b.setAttribute("aria-label", "Copy code block");
+    wrap.appendChild(b);
+  }
 }

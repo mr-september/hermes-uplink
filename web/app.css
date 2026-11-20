@@ -113,6 +113,11 @@
   .body code{background:#0b0f14; border:1px solid var(--border); border-radius:4px; padding:1px 5px; font-size:.9em; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
   .body pre{background:#0b0f14; border:1px solid var(--border); border-radius:8px; padding:12px; overflow:auto; margin:0 0 10px}
   .body pre code{background:none; border:none; padding:0; font-size:.88em; white-space:pre}
+  /* Copy button on code blocks (see markdown.js decorateCodeBlocks): anchored to the wrapper so it
+     stays visible while a long block scrolls, and outside the <pre> so it is never part of the copy. */
+  .code-wrap{position:relative}
+  .code-copy{position:absolute; top:6px; right:6px; z-index:1; font:inherit; font-size:12px; line-height:1; padding:6px 9px; border-radius:6px; border:1px solid var(--border); background:#151b23; color:var(--muted); cursor:pointer}
+  .code-copy:active,.code-copy:hover{color:var(--text)}
   .body blockquote{margin:0 0 10px; padding:4px 12px; border-left:3px solid var(--border); color:var(--muted)}
   .body table{border-collapse:collapse; margin:0 0 10px; width:100%; font-size:.92em; display:block; overflow:auto}
   .body th,.body td{border:1px solid var(--border); padding:5px 9px; text-align:left}

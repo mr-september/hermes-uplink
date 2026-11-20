@@ -325,6 +325,11 @@ export async function openSession(id, title){
 export async function newSession(){
   try{
     const payload = {};
+    // Stamp the source the desktop's recents list expects. The create default "api_server" belongs
+    // to the external-messaging slice (its own section under Messaging), so a plain new chat landed
+    // there and never showed among the desktop's chats. "desktop" puts it with the local sessions
+    // and rides the same owner path Uplink already uses to continue existing sessions.
+    payload.source = "desktop";
     if(cfg.defaultModel){
       payload.model = cfg.defaultModel;
       if(cfg.defaultProvider) payload.provider = cfg.defaultProvider;

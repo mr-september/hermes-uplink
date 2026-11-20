@@ -77,6 +77,20 @@ export function showError(el, text){
   error.classList.add("err");
   el.replaceChildren(error);
 }
+// Clipboard with an execCommand fallback (works even without a secure context).
+export function copyText(text, done){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(done).catch(()=>fallbackCopy(text, done));
+  } else fallbackCopy(text, done);
+}
+function fallbackCopy(text, cb){
+  try{
+    const ta = document.createElement("textarea");
+    ta.className = "copy-ta"; ta.value = text;
+    document.body.appendChild(ta); ta.select();
+    document.execCommand("copy"); document.body.removeChild(ta); if(cb) cb();
+  }catch{ /* clipboard unavailable */ }
+}
 export function badgeElement(text, extraClass){
   const badge=document.createElement("span");
   badge.className="badge"+(extraClass?" "+extraClass:"");

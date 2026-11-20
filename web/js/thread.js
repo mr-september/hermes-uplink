@@ -1,5 +1,5 @@
 import {updateRingState} from "./composer.js";
-import {extractModelTags, setBody} from "./markdown.js";
+import {extractModelTags, setBody, decorateCodeBlocks} from "./markdown.js";
 import {openSession} from "./sessions.js";
 import {foregroundStream, localThread, sessionRenderCache, state} from "./state.js";
 import {streamTurn} from "./stream.js";
@@ -248,6 +248,7 @@ function toolSection(label, text){
   code.textContent = text;
   pre.appendChild(code);
   sec.append(h, pre);
+  decorateCodeBlocks(sec);   // same copy button as reply code blocks
   return sec;
 }
 function renderToolBody(bodyEl, input, output){
