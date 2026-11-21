@@ -1,6 +1,6 @@
 # Patching your own Hermes for Uplink
 
-Uplink works against a stock Hermes gateway and shows less where a feature is missing ([gateway-requirements.md](gateway-requirements.md)). If upstream has not merged what you want, this page is a brief you can give to your own Hermes agent (or any coding agent) to add it to your local checkout.
+Uplink works against a stock Hermes gateway and shows less where a feature is missing ([gateway-requirements.md](gateway-requirements.md)). If upstream has not merged what you want, this page is a brief you can give to your own Hermes agent (or any coding agent) to add it to your local checkout. It is self-contained: nothing here requires any repository other than your hermes-agent checkout.
 
 > **Prompt for the agent.** You are patching a local checkout of hermes-agent so the Hermes Uplink web client can use optional gateway features. Do only the sections below that I name. Locate code by the symbol names given, not by line number, because my checkout may differ from the one this was written against. Before editing, confirm each named symbol exists; if one does not, stop and report what you found instead of guessing. Make the smallest change, follow the repo's own conventions (`AGENTS.md`, line-count and lint checks), add a test that fails before the change, and do not push or open a PR.
 
@@ -22,22 +22,34 @@ The sections are keyed to hermes-agent `main` at `b1ef9bea695d` (2026-11-20), *a
 
 **Check:** `curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8642/api/sessions/<id>` shows `"unread": false`; restart the gateway first.
 
-## 2. Context ring, interactive questions, batch clarify
+## 2. Context ring (`context_used` / `context_window`)
 
-These are larger — occupancy spans the schema and store layers, and clarify is a REST surface upstream does not expose at all — so they are not reproduced here. The reference implementation is the **`larry` branch** of [mr-september/hermes-agent](https://github.com/mr-september/hermes-agent) — not `main`, which is a historical mirror. Start from that branch's `FORK.md`: its persistent-patch table names every owning module and its guard test, and it is kept current through each upstream sync.
+**Semantics:** `context_window` is the context window of the model the session last ran with; `context_used` is the token count of the most recent assembled prompt. Both are `null` until the session's first completed agent turn.
 
-| Feature | Fork owners (see `FORK.md` on `larry`) | Contract |
-|---|---|---|
-| Context ring | occupancy columns in `persistence/sqlite/_schema_ddl.py`, the worker receipt + holder merge rule, the session interface (`SESSION_ROW_COLUMNS`, `SessionRecord`), adapter mapping, and the API passthrough in `gateway/platforms/api_server.py` | adds `context_used` and `context_window` to the session detail response |
-| Interactive questions | fork-owned `gateway/platforms/api_server_clarify*.py` plus session-scoped helpers in `tools/clarify_gateway.py`, composed on upstream's entry-scoped clarify internals | [clarify-protocol.md](clarify-protocol.md) |
+**Failure mode to guard against:** silent drops. Every layer between the writer and the response drops a key it does not know about, so carry the two fields through *all* of them:
 
-Port the clarify surface against your checkout's current clarify internals, not against the fork's older code. Then advertise the features in `/v1/capabilities` (`features.clarify`, and `features.clarify_batch` if you also port batch locking), since Uplink treats an absent flag as unsupported.
+1. **Schema** — two nullable integer columns, `context_window` and `context_used`, on the sessions table, added through your checkout's schema/migration machinery (as of the key pin: `persistence/sqlite/_schema_ddl.py`).
+2. **Write path** — wherever the agent loop reports the prompt-size observation after a turn (near the context controller that decides when to compact — it knows both the assembled prompt size and the configured window), persist it through the per-session update path that already writes session stats. Merge rule: a reported value overwrites; a turn that reports nothing must keep the stored value — never null it out.
+3. **Read path** — carry both columns through every hop of a session row: the store's row-column list and record type (as of the key pin: `SESSION_ROW_COLUMNS` and `SessionRecord`), the adapter that maps a store row to an API dict, and the session detail response, which gains both fields, nullable.
 
-Without section 2, a clarify call from the agent has no card in Uplink and waits for its timeout; avoid prompts that depend on it.
+**Test:** fake a turn that reports known token counts, then `GET /api/sessions/<id>` and assert both values; follow with a turn that reports nothing and assert the stored values survive. No capabilities flag is needed for this one — Uplink shows the ring when the fields are present and hides it when they are not.
 
-## 3. (Optional) sending into sessions the API server does not own
+## 3. Interactive questions (clarify) and the batch lock
 
-By default the API server admits turns only into sessions it created (`source` `api_server` or `bot_room`); Uplink handles other sessions through its CLI fallback and this is fine on stock. The reference implementation additionally widens the gates for `local`/`desktop` sessions so REST sends reach them directly. This must be done as a *storage-source* check (same physical store → same conversation identity), not by merely relaxing the admission tuple in `admit_api_steps`: a bare widening rebinds the conversation's route away from its owner, which is the defect the upstream check exists to prevent. Messaging sessions (telegram and friends) must stay refused. If you skip this section, nothing else breaks — Uplink keeps using the CLI fallback.
+The wire contract is fully specified in [clarify-protocol.md](clarify-protocol.md) — implement exactly that; your checkout's agent-side `clarify` tool already owns the ask-and-wait machinery (as of the key pin: `tools/clarify_gateway.py`). What upstream lacks is the gateway's REST/SSE surface around it. Four parts:
+
+1. **SSE on the chat stream.** When the agent calls `clarify` mid-turn on a streamed request, emit the `clarify` event with the fields in the protocol's table, including the batch shapes (`questions`, `batch: true`, and `locked` on recovery). Emit `clarify.settled` with the outcome (`submitted` / `timed_out` / `cancelled`) when the question resolves, no matter which path resolved it — answer, timeout, typed-reply skip, or cancel.
+2. **Session-scoped routes.** The client cannot address a question by run id alone — discovery must work by session. Implement `GET /api/sessions/{id}/clarify/pending` (returns `{pending, clarify}`), `POST /api/sessions/{id}/clarify/respond` (single, batch, and lockless-batch body shapes; an already-settled `clarify_id` answers `409`/`404`, never `200`), and `POST /api/sessions/{id}/clarify/lock` for batch (stores the partial answer, returns the authoritative `{locked}`).
+3. **Typed-reply composition.** A user message arriving while a *single* question is pending resolves it as skipped and then proceeds as a normal turn. One arriving while a *batch* is pending starts no turn and receives the `clarify.intercept` event. Compose these behaviors onto your checkout's existing clarify internals — do not duplicate the agent-side question machinery.
+4. **Capabilities.** Advertise `features.clarify`, the endpoint keys `session_clarify_respond` and `session_clarify_lock`, and `features.clarify_batch` only if you implemented the lock route. Uplink treats absent flags as unsupported; an absent flag is a correct degradation, a false one is not.
+
+**Test:** with a live gateway, run one streamed turn that triggers `clarify` with a generous timeout, then drive the protocol's happy path, the `409` double-answer, the timeout, and the typed-reply cases over HTTP.
+
+Without this section, a clarify call from the agent has no card in Uplink and waits for its timeout; avoid prompts that depend on it.
+
+## 4. (Optional) sending into sessions the API server does not own
+
+By default the API server admits turns only into sessions it created (`source` `api_server` or `bot_room`); Uplink handles other sessions through its CLI fallback and this is fine on stock. Optionally, you can widen the gates for `local`/`desktop` sessions so REST sends reach them directly. Do it as a *storage-source* check (same physical store → same conversation identity), not by merely relaxing the admission tuple in `admit_api_steps`: a bare widening rebinds the conversation's route away from its owner, which is the defect the upstream check exists to prevent. Messaging sessions (telegram and friends) must stay refused. If you skip this section, nothing else breaks — Uplink keeps using the CLI fallback.
 
 ## After patching
 
