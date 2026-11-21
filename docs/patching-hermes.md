@@ -51,6 +51,13 @@ Without this section, a clarify call from the agent has no card in Uplink and wa
 
 By default the API server admits turns only into sessions it created (`source` `api_server` or `bot_room`); Uplink handles other sessions through its CLI fallback and this is fine on stock. Optionally, you can widen the gates for `local`/`desktop` sessions so REST sends reach them directly. Do it as a *storage-source* check (same physical store → same conversation identity), not by merely relaxing the admission tuple in `admit_api_steps`: a bare widening rebinds the conversation's route away from its owner, which is the defect the upstream check exists to prevent. Messaging sessions (telegram and friends) must stay refused. If you skip this section, nothing else breaks — Uplink keeps using the CLI fallback.
 
+## 5. (Optional) Kanban board (read-only)
+
+Implement per [kanban-protocol.md](kanban-protocol.md); the endpoints must be advertised under
+`features.kanban_read` with the endpoint keys `kanban_boards`, `kanban_board`, and `kanban_task` in
+`/v1/capabilities`. The shape doc is the authority — this section is only the pointer. Without it, Uplink shows
+no board view and no kanban affordance.
+
 ## After patching
 
 Restart the gateway, reload Uplink, and open **Capabilities** (the ⓘ button) to see the raw `/v1/capabilities` response and confirm the flags you expect. Re-apply the patches after each Hermes update, since an upstream change to the touched functions can drop them silently; your agent's tests are the tripwire.

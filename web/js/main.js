@@ -2,6 +2,7 @@ import {loadGatewayCaps} from "./api.js";
 import {initClarifyHotkeys, probePendingClarify} from "./clarify.js";
 import {initComposer, loadDraft, updateRingState} from "./composer.js";
 import {ensureAuth, logout, openSettings, probe, runDiag, setStatus, showAuth, showOfflineBanner, submitAuth} from "./connection.js";
+import {initKanban, refreshKanban} from "./kanban.js";
 import {initLayout, loadSkills, loadTools} from "./layout.js";
 import {fetchModelOptions, initModelPicker, loadCachedModelOptions, updateModelChip} from "./models.js";
 import {copyActiveId, lastSessionRows, loadSessions, newSession, refresh, renderSessions} from "./sessions.js";
@@ -22,6 +23,7 @@ export function boot(){
   updateRingState();
   loadSkills();
   loadTools();
+  initKanban();
   loadCachedModelOptions();
   fetchModelOptions();
   updateModelChip(state.sessionModel, state.sessionProvider);
@@ -75,14 +77,15 @@ $("thread").addEventListener("click", e=>{
 });
 
 // Coming back to the page refreshes it (there is no background polling) and recovers a question that may be waiting.
-document.addEventListener("visibilitychange", ()=>{ if(!document.hidden){ refresh(); probePendingClarify(); } });
-window.addEventListener("focus", ()=>{ refresh(); probePendingClarify(); });
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden){ refresh(); probePendingClarify(); refreshKanban(); } });
+window.addEventListener("focus", ()=>{ refresh(); probePendingClarify(); refreshKanban(); });
 window.addEventListener("online", ()=>{
   showOfflineBanner(false);
   if(!booted){ reconnect(); return; }
   probe();
   refresh();
   probePendingClarify();
+  refreshKanban();
 });
 window.addEventListener("offline", ()=>{
   setStatus("bad");

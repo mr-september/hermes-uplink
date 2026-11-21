@@ -214,6 +214,14 @@ class ProxyIntegrationTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual((UpstreamHandler.last_idempotency_key, UpstreamHandler.last_client_turn_id), (turn, turn))
 
+    def test_kanban_reads_are_proxied_like_every_other_api_path(self):
+        # The board routes (fork extension, docs/kanban-protocol.md) need no proxy special-casing; pin that.
+        cookie = self.authenticate()
+        UpstreamHandler.last_authorization = None
+        status, _, _ = self.request("GET", "/api/kanban/board?board=home", headers={"Cookie": cookie})
+        self.assertEqual(status, 200)
+        self.assertEqual(UpstreamHandler.last_authorization, "Bearer test-api-key")
+
     def test_upstream_validation_requires_loopback_or_explicit_https_remote(self):
         self.assertTrue(server.is_loopback_host("127.0.0.1"))
         self.assertTrue(server.is_loopback_host("::1"))

@@ -65,6 +65,7 @@ The proxy takes the API key and passphrase from the `HERMES_API_KEY` / `UPLINK_P
 | `stream.js` | Turns: the chat stream, SSE frame handling, send and stop |
 | `thread.js` | Message bubbles, tool and thought cards, history rendering, message actions |
 | `clarify.js` | Clarify cards (single, multi-select, batch) and their recovery |
+| `kanban.js` | Read-only Kanban board view and task drawer (fork extension; docs/kanban-protocol.md) |
 | `composer.js` | The message box, drafts, and the send/stop ring with context usage |
 | `models.js` | The model chip and picker |
 | `markdown.js` | Markdown and Hermes system-note rendering, link sanitizing |

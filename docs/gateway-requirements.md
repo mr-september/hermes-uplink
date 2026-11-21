@@ -30,8 +30,9 @@ Uplink sends every turn to REST first and, on that refusal, continues it through
 | Batched questions with partial saves | `POST …/clarify/lock`, `features.clarify_batch`, `batch`, and `locked` fields on the `clarify` event | Batches fall back to one submit with no server-side partial save | As above. *Extension.* |
 | Turn de-duplication | `Idempotency-Key` and `client_turn_id` on chat/stream | A retried send after a dropped connection can run twice | Not implemented for session streaming; the client already sends both. |
 | Activity status | `activity_state`, `status_updated_at` on session rows | Not implemented in the client either | Planned; see [session-status.md](session-status.md). |
+| Kanban board (read-only) | `features.kanban_read` in `/v1/capabilities`; endpoint keys `kanban_boards`, `kanban_board`, `kanban_task` (`GET /api/kanban/boards`, `GET /api/kanban/board`, `GET /api/kanban/tasks/{id}`) | No board view; no kanban affordance anywhere | Not on the REST surface. *Extension.* See [kanban-protocol.md](kanban-protocol.md). |
 
-To add the *extension* items to your own Hermes checkout, see [patching-hermes.md](patching-hermes.md). Protocol details for the clarify items are in [clarify-protocol.md](clarify-protocol.md).
+To add the *extension* items to your own Hermes checkout, see [patching-hermes.md](patching-hermes.md). Protocol details for the clarify items are in [clarify-protocol.md](clarify-protocol.md), for the kanban board in [kanban-protocol.md](kanban-protocol.md).
 
 ## Compatibility rule
 

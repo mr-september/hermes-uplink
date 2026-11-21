@@ -19,8 +19,9 @@ export async function failureMessage(res){
 // GET /v1/capabilities is fetched in the background; chatting never waits for it. Until it answers (or if it
 // fails or lacks the flags) both capabilities are assumed supported, so old and new gateways both work.
 let gatewayCaps = null, gatewayCapsRequested = false, gatewayCapsRetryAt = 0;
-export async function loadGatewayCaps(){
-  if(gatewayCapsRequested || Date.now() < gatewayCapsRetryAt) return;
+// `force` re-requests after a successful load (the browser tests re-script capabilities; the app does not need it).
+export async function loadGatewayCaps(force){
+  if((gatewayCapsRequested && !force) || Date.now() < gatewayCapsRetryAt) return;
   gatewayCapsRequested = true;
   const ctrl = new AbortController();
   const to = setTimeout(()=>ctrl.abort(), 4000);
@@ -33,6 +34,8 @@ export async function loadGatewayCaps(){
     gatewayCaps = null; gatewayCapsRequested = false; gatewayCapsRetryAt = Date.now() + 60000;
   }finally{ clearTimeout(to); }
 }
+// The latest /v1/capabilities response, or null until one arrives; feature gates read it (see kanban.js).
+export function capabilities(){ return gatewayCaps; }
 export function clientCapabilities(){
   const d = gatewayCaps;
   if(!d) return ["clarify", "clarify_batch"];

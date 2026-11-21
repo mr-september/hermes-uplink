@@ -98,7 +98,7 @@ function toggleRightPanel(){
 /* ---------- More menu (narrow header): proxies the header buttons it hides ---------- */
 function initMoreMenu(){
   const btn = $("moreBtn"), menu = $("moreMenu");
-  const items = ()=> Array.from(menu.querySelectorAll('[role="menuitem"]')).filter(b=> !b.disabled);
+  const items = ()=> Array.from(menu.querySelectorAll('[role="menuitem"]')).filter(b=> !b.disabled && !b.classList.contains("hidden"));
   const isOpen = ()=> !menu.classList.contains("hidden");
   function close(returnFocus){
     if(!isOpen()) return;

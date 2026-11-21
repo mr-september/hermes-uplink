@@ -79,6 +79,7 @@ flowchart LR
 - **Real-time Streaming:** Supports streaming turns via Server-Sent Events.
 - **Interactive Questions:** Answers the agent's clarify prompts from the browser: single choice, multi-select, free text, or a batch of questions ([protocol](docs/clarify-protocol.md)).
 - **Unread Markers:** Shows which sessions have new activity, including work done from other clients ([details](docs/session-status.md)).
+- **Kanban Board:** A read-only board view (columns, cards with progress rollups, task drawer) on gateways that advertise kanban support ([protocol](docs/kanban-protocol.md)).
 - **Tool Discovery:** Discovers skills and toolsets through Hermes API endpoints.
 - **Custom UI:** Mobile-responsive three-pane interface with orientation-gated sidebar pinning and a Hermes-amber theme.
 - **Installable App (PWA):** Use "Add to Home Screen" on iOS/Android for a fullscreen, native app-like experience.
@@ -171,6 +172,7 @@ The launcher never uses a global Funnel reset and refuses to overwrite an unrela
 - [docs/gateway-requirements.md](docs/gateway-requirements.md): which Hermes gateway features Uplink uses and what happens without each.
 - [docs/patching-hermes.md](docs/patching-hermes.md): a brief for your own Hermes agent to add the gateway features Uplink needs locally, if upstream has not merged them.
 - [docs/clarify-protocol.md](docs/clarify-protocol.md): how interactive agent questions travel between gateway and client.
+- [docs/kanban-protocol.md](docs/kanban-protocol.md): the read-only Kanban board's client contract (fork extension; stock gateways lack it).
 - [docs/session-status.md](docs/session-status.md): mobile header, unread indicators, and the planned activity status.
 
 ## Development and Verification
@@ -194,7 +196,7 @@ python -m unittest discover -s tests -v    # python3 on Linux
 
 After editing any `.html`, `.js`, or `.css` file in `web/`, run `python -m uplink.assets --update`; the proxy refuses to start while the digests in `web/pinned-hashes.json` are stale.
 
-The server tests cover authentication, cookie sessions, API-key injection, SSE responses, malformed requests, pinned-asset integrity and serving, and loopback validation. Internet-access tests use a fake Tailscale command runner and do not require a Tailscale account. A browser test (`tests/test_client_clarify.py`) drives the real clarify cards in a real Chrome/Chromium against the real client modules with a recording fetch stub; it skips when no browser is found — set `CHROME_BIN` to point at one.
+The server tests cover authentication, cookie sessions, API-key injection, SSE responses, malformed requests, pinned-asset integrity and serving, and loopback validation. Internet-access tests use a fake Tailscale command runner and do not require a Tailscale account. Two browser tests (`tests/test_client_clarify.py`, `tests/test_client_kanban.py`) drive the real clarify cards and the real Kanban board in a real Chrome/Chromium against the real client modules with a recording fetch stub; they skip when no browser is found — set `CHROME_BIN` to point at one.
 
 Before release, perform a live acceptance test from an external network:
 
